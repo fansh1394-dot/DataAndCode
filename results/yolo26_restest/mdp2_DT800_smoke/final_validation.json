@@ -1,0 +1,140 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at_utc": "2026-11-05T08:20:06Z",
+  "experiment": {
+    "task": "detect",
+    "args": {
+      "epochs": 2,
+      "batch": 16,
+      "imgsz": 640,
+      "data": "/3250410011/root/rivermind-data/mendeley_split/data.yaml",
+      "lr0": 0.01,
+      "optimizer": "auto",
+      "device": "0"
+    }
+  },
+  "model": {
+    "family": "YOLOMM",
+    "task": "detect",
+    "model_class": "DetectionModel",
+    "yaml": "yolo26n-mm-dual-fusion-concat.yaml",
+    "nc": 1,
+    "names": {
+      "0": "UAV"
+    },
+    "channels": 3
+  },
+  "multimodal": {
+    "enabled": true,
+    "mode": "dual",
+    "modality": null,
+    "models": [
+      "rgb",
+      "ir"
+    ],
+    "x_modality": "ir",
+    "x_channels": 3,
+    "modalities": {
+      "rgb": "images",
+      "ir": "images_ir"
+    }
+  },
+  "data": {
+    "data_cfg": "/3250410011/root/rivermind-data/mendeley_split/data.yaml",
+    "data_dict": {
+      "path": "/3250410011/root/rivermind-data/mendeley_split",
+      "train": "/3250410011/root/rivermind-data/mendeley_split/images/train",
+      "val": "/3250410011/root/rivermind-data/mendeley_split/images/val",
+      "test": "/3250410011/root/rivermind-data/mendeley_split/images/test",
+      "nc": 1,
+      "Xch": 3
+    }
+  },
+  "final_validation": {
+    "checkpoint": {
+      "best": "/3250410011/root/rivermind-data/MutilModel_3485988898/YOLO26/ResTest/mdp2_DT800_smoke/weights/best.pt",
+      "last": "/3250410011/root/rivermind-data/MutilModel_3485988898/YOLO26/ResTest/mdp2_DT800_smoke/weights/last.pt"
+    },
+    "metrics_raw": {
+      "metrics/precision(B)": 0.6271697653755041,
+      "metrics/recall(B)": 0.5178907721280602,
+      "metrics/mAP50(B)": 0.5678286353323618,
+      "metrics/mAP50-95(B)": 0.20703631530896657,
+      "metrics/rgb/metrics/precision(B)": 0.43874909393456746,
+      "metrics/rgb/metrics/recall(B)": 0.3691148775894539,
+      "metrics/rgb/metrics/mAP50(B)": 0.33312418143619427,
+      "metrics/rgb/metrics/mAP50-95(B)": 0.11163410367988195,
+      "metrics/rgb/fitness": 0.1337831114555132,
+      "metrics/ir/metrics/precision(B)": 0.3922587123715862,
+      "metrics/ir/metrics/recall(B)": 0.2768361581920904,
+      "metrics/ir/metrics/mAP50(B)": 0.26142807754355435,
+      "metrics/ir/metrics/mAP50-95(B)": 0.08501584417644009,
+      "metrics/ir/fitness": 0.10265706751315151,
+      "metrics/fuse/metrics/precision(B)": 0.6271697653755041,
+      "metrics/fuse/metrics/recall(B)": 0.5178907721280602,
+      "metrics/fuse/metrics/mAP50(B)": 0.5678286353323618,
+      "metrics/fuse/metrics/mAP50-95(B)": 0.20703631530896657,
+      "metrics/fuse/fitness": 0.2431155473113061,
+      "metrics/fuse_ir/metrics/precision(B)": 0.5516450175670161,
+      "metrics/fuse_ir/metrics/recall(B)": 0.5329566854990584,
+      "metrics/fuse_ir/metrics/mAP50(B)": 0.5344963533820912,
+      "metrics/fuse_ir/metrics/mAP50-95(B)": 0.17848023148765382,
+      "metrics/fuse_ir/fitness": 0.21408184367709757,
+      "metrics/fusion_gain_over_rgb": 0.09540221162908462,
+      "metrics/fusion_gain_over_ir": 0.12202047113252648,
+      "metrics/subset/rgb/both/metrics/precision(B)": 0.43874909393456746,
+      "metrics/subset/rgb/both/metrics/recall(B)": 0.3691148775894539,
+      "metrics/subset/rgb/both/metrics/mAP50(B)": 0.33312418143619427,
+      "metrics/subset/rgb/both/metrics/mAP50-95(B)": 0.11163410367988195,
+      "metrics/subset/rgb/both/fitness": 0.1337831114555132,
+      "metrics/subset/ir/both/metrics/precision(B)": 0.3922587123715862,
+      "metrics/subset/ir/both/metrics/recall(B)": 0.2768361581920904,
+      "metrics/subset/ir/both/metrics/mAP50(B)": 0.26142807754355435,
+      "metrics/subset/ir/both/metrics/mAP50-95(B)": 0.08501584417644009,
+      "metrics/subset/ir/both/fitness": 0.10265706751315151,
+      "metrics/subset/fuse/both/metrics/precision(B)": 0.6271697653755041,
+      "metrics/subset/fuse/both/metrics/recall(B)": 0.5178907721280602,
+      "metrics/subset/fuse/both/metrics/mAP50(B)": 0.5678286353323618,
+      "metrics/subset/fuse/both/metrics/mAP50-95(B)": 0.20703631530896657,
+      "metrics/subset/fuse/both/fitness": 0.2431155473113061,
+      "metrics/subset/fuse_ir/both/metrics/precision(B)": 0.5516450175670161,
+      "metrics/subset/fuse_ir/both/metrics/recall(B)": 0.5329566854990584,
+      "metrics/subset/fuse_ir/both/metrics/mAP50(B)": 0.5344963533820912,
+      "metrics/subset/fuse_ir/both/metrics/mAP50-95(B)": 0.17848023148765382,
+      "metrics/subset/fuse_ir/both/fitness": 0.21408184367709757,
+      "metrics/fusion_dual_coord_hm": 0.19170066599677707
+    },
+    "metrics_normalized": {
+      "task": "detect",
+      "groups": [
+        {
+          "group": "B",
+          "raw_keys": {
+            "precision": "metrics/subset/fuse_ir/both/metrics/precision(B)",
+            "recall": "metrics/subset/fuse_ir/both/metrics/recall(B)",
+            "map50": "metrics/subset/fuse_ir/both/metrics/mAP50(B)",
+            "map50_95": "metrics/subset/fuse_ir/both/metrics/mAP50-95(B)"
+          },
+          "precision": 0.5516450175670161,
+          "recall": 0.5329566854990584,
+          "map50": 0.5344963533820912,
+          "map50_95": 0.17848023148765382
+        }
+      ],
+      "primary_metric": {
+        "name": "map50_95",
+        "group": "B",
+        "value": 0.17848023148765382
+      }
+    }
+  },
+  "summary": {
+    "text": "task=detect; multimodal=dual, x_modality=ir, x_channels=3; primary=B.map50_95=0.1785; groups=[B: P=0.5516, R=0.5330, mAP50=0.5345, mAP50-95=0.1785]"
+  },
+  "integrity": {
+    "missing_fields": [],
+    "warnings": [
+      "per_class metrics not available"
+    ]
+  }
+}

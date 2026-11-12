@@ -1,0 +1,97 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at_utc": "2026-10-26T17:00:48Z",
+  "experiment": {
+    "task": "detect",
+    "args": {
+      "epochs": 40,
+      "batch": 16,
+      "imgsz": 640,
+      "data": "/3250410011/root/rivermind-data/mendeley_split/data.yaml",
+      "lr0": 0.01,
+      "optimizer": "auto",
+      "device": "0"
+    }
+  },
+  "model": {
+    "family": "YOLOMM",
+    "task": "detect",
+    "model_class": "DetectionModel",
+    "yaml": "yolo26n-mm-single-baseline.yaml",
+    "nc": 1,
+    "names": {
+      "0": "UAV"
+    },
+    "channels": 3
+  },
+  "multimodal": {
+    "enabled": true,
+    "mode": "dual",
+    "modality": null,
+    "models": [
+      "rgb",
+      "ir"
+    ],
+    "x_modality": "ir",
+    "x_channels": 3,
+    "modalities": {
+      "rgb": "images",
+      "ir": "images_ir"
+    }
+  },
+  "data": {
+    "data_cfg": "/3250410011/root/rivermind-data/mendeley_split/data.yaml",
+    "data_dict": {
+      "path": "/3250410011/root/rivermind-data/mendeley_split",
+      "train": "/3250410011/root/rivermind-data/mendeley_split/images/train",
+      "val": "/3250410011/root/rivermind-data/mendeley_split/images/val",
+      "test": "/3250410011/root/rivermind-data/mendeley_split/images/test",
+      "nc": 1,
+      "Xch": 3
+    }
+  },
+  "final_validation": {
+    "checkpoint": {
+      "best": "/3250410011/root/rivermind-data/MutilModel_3485988898/YOLO26/ResTest/mdp_M2_ir_s0/weights/best.pt",
+      "last": "/3250410011/root/rivermind-data/MutilModel_3485988898/YOLO26/ResTest/mdp_M2_ir_s0/weights/last.pt"
+    },
+    "metrics_raw": {
+      "metrics/precision(B)": 0.8766837444684387,
+      "metrics/recall(B)": 0.8166921686538642,
+      "metrics/mAP50(B)": 0.8841191364702974,
+      "metrics/mAP50-95(B)": 0.5729443880817406
+    },
+    "metrics_normalized": {
+      "task": "detect",
+      "groups": [
+        {
+          "group": "B",
+          "raw_keys": {
+            "precision": "metrics/precision(B)",
+            "recall": "metrics/recall(B)",
+            "map50": "metrics/mAP50(B)",
+            "map50_95": "metrics/mAP50-95(B)"
+          },
+          "precision": 0.8766837444684387,
+          "recall": 0.8166921686538642,
+          "map50": 0.8841191364702974,
+          "map50_95": 0.5729443880817406
+        }
+      ],
+      "primary_metric": {
+        "name": "map50_95",
+        "group": "B",
+        "value": 0.5729443880817406
+      }
+    }
+  },
+  "summary": {
+    "text": "task=detect; multimodal=dual, x_modality=ir, x_channels=3; primary=B.map50_95=0.5729; groups=[B: P=0.8767, R=0.8167, mAP50=0.8841, mAP50-95=0.5729]"
+  },
+  "integrity": {
+    "missing_fields": [],
+    "warnings": [
+      "per_class metrics not available"
+    ]
+  }
+}

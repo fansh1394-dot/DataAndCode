@@ -1,0 +1,2 @@
+Class,Precision,Recall,F1,mAP50,mAP50-95
+drone,0.888646,0.694118,0.779428,0.793782,0.469274
