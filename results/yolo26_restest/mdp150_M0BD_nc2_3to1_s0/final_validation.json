@@ -1,0 +1,141 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at_utc": "2026-11-11T08:48:01Z",
+  "experiment": {
+    "task": "detect",
+    "args": {
+      "epochs": 25,
+      "batch": 24,
+      "imgsz": 640,
+      "data": "/root/rivermind-fs/birddrone/bd_nc2/data_3to1.yaml",
+      "lr0": 0.001,
+      "optimizer": "auto",
+      "device": "0"
+    }
+  },
+  "model": {
+    "family": "YOLOMM",
+    "task": "detect",
+    "model_class": "DetectionModel",
+    "yaml": "tmp48m9p4j5.yaml",
+    "nc": 2,
+    "names": {
+      "0": "bird",
+      "1": "drone"
+    },
+    "channels": 3
+  },
+  "multimodal": {
+    "enabled": true,
+    "mode": "dual",
+    "modality": null,
+    "models": [
+      "rgb",
+      "ir"
+    ],
+    "x_modality": "ir",
+    "x_channels": 3,
+    "modalities": {
+      "rgb": "images",
+      "ir": "images_ir"
+    }
+  },
+  "data": {
+    "data_cfg": "/root/rivermind-fs/birddrone/bd_nc2/data_3to1.yaml",
+    "data_dict": {
+      "path": "/root/rivermind-fs/birddrone/bd_nc2",
+      "train": "/3250410011/root/rivermind-fs/birddrone/bd_nc2/train_3to1.txt",
+      "val": "/3250410011/root/rivermind-fs/birddrone/bd_nc2/val_bal.txt",
+      "test": "/3250410011/root/rivermind-fs/birddrone/bd_nc2/images/test",
+      "nc": 2,
+      "Xch": 3
+    }
+  },
+  "final_validation": {
+    "checkpoint": {
+      "best": "/3250410011/root/rivermind-data/MutilModel_3485988898/YOLO26/ResTest/mdp150_M0BD_nc2_3to1_s0/weights/best.pt",
+      "last": "/3250410011/root/rivermind-data/MutilModel_3485988898/YOLO26/ResTest/mdp150_M0BD_nc2_3to1_s0/weights/last.pt"
+    },
+    "metrics_raw": {
+      "metrics/precision(B)": 0.866401198803402,
+      "metrics/recall(B)": 0.8521375666362916,
+      "metrics/mAP50(B)": 0.8829404167612622,
+      "metrics/mAP50-95(B)": 0.4685898177664849,
+      "metrics/rgb/metrics/precision(B)": 0.8385339821261671,
+      "metrics/rgb/metrics/recall(B)": 0.8292381606039807,
+      "metrics/rgb/metrics/mAP50(B)": 0.8422585041313102,
+      "metrics/rgb/metrics/mAP50-95(B)": 0.41547466192110327,
+      "metrics/rgb/fitness": 0.458153046142124,
+      "metrics/ir/metrics/precision(B)": 0.6337229045253074,
+      "metrics/ir/metrics/recall(B)": 0.6254975978037063,
+      "metrics/ir/metrics/mAP50(B)": 0.6132197030516701,
+      "metrics/ir/metrics/mAP50-95(B)": 0.29735303809295266,
+      "metrics/ir/fitness": 0.32893970458882443,
+      "metrics/fuse/metrics/precision(B)": 0.866401198803402,
+      "metrics/fuse/metrics/recall(B)": 0.8521375666362916,
+      "metrics/fuse/metrics/mAP50(B)": 0.8829404167612622,
+      "metrics/fuse/metrics/mAP50-95(B)": 0.4685898177664849,
+      "metrics/fuse/fitness": 0.5100248776659626,
+      "metrics/fuse_ir/metrics/precision(B)": 0.8715704517421473,
+      "metrics/fuse_ir/metrics/recall(B)": 0.8521506170809818,
+      "metrics/fuse_ir/metrics/mAP50(B)": 0.8868195993883571,
+      "metrics/fuse_ir/metrics/mAP50-95(B)": 0.4727737742196133,
+      "metrics/fuse_ir/fitness": 0.5141783567364877,
+      "metrics/fusion_gain_over_rgb": 0.05311515584538162,
+      "metrics/fusion_gain_over_ir": 0.17123677967353224,
+      "metrics/subset/rgb/both/metrics/precision(B)": 0.8385339821261671,
+      "metrics/subset/rgb/both/metrics/recall(B)": 0.8292381606039807,
+      "metrics/subset/rgb/both/metrics/mAP50(B)": 0.8422585041313102,
+      "metrics/subset/rgb/both/metrics/mAP50-95(B)": 0.41547466192110327,
+      "metrics/subset/rgb/both/fitness": 0.458153046142124,
+      "metrics/subset/ir/both/metrics/precision(B)": 0.6337229045253074,
+      "metrics/subset/ir/both/metrics/recall(B)": 0.6254975978037063,
+      "metrics/subset/ir/both/metrics/mAP50(B)": 0.6132197030516701,
+      "metrics/subset/ir/both/metrics/mAP50-95(B)": 0.29735303809295266,
+      "metrics/subset/ir/both/fitness": 0.32893970458882443,
+      "metrics/subset/fuse/both/metrics/precision(B)": 0.866401198803402,
+      "metrics/subset/fuse/both/metrics/recall(B)": 0.8521375666362916,
+      "metrics/subset/fuse/both/metrics/mAP50(B)": 0.8829404167612622,
+      "metrics/subset/fuse/both/metrics/mAP50-95(B)": 0.4685898177664849,
+      "metrics/subset/fuse/both/fitness": 0.5100248776659626,
+      "metrics/subset/fuse_ir/both/metrics/precision(B)": 0.8715704517421473,
+      "metrics/subset/fuse_ir/both/metrics/recall(B)": 0.8521506170809818,
+      "metrics/subset/fuse_ir/both/metrics/mAP50(B)": 0.8868195993883571,
+      "metrics/subset/fuse_ir/both/metrics/mAP50-95(B)": 0.4727737742196133,
+      "metrics/subset/fuse_ir/both/fitness": 0.5141783567364877,
+      "metrics/fusion_dual_coord_hm": 0.47067249754923013
+    },
+    "metrics_normalized": {
+      "task": "detect",
+      "groups": [
+        {
+          "group": "B",
+          "raw_keys": {
+            "precision": "metrics/subset/fuse_ir/both/metrics/precision(B)",
+            "recall": "metrics/subset/fuse_ir/both/metrics/recall(B)",
+            "map50": "metrics/subset/fuse_ir/both/metrics/mAP50(B)",
+            "map50_95": "metrics/subset/fuse_ir/both/metrics/mAP50-95(B)"
+          },
+          "precision": 0.8715704517421473,
+          "recall": 0.8521506170809818,
+          "map50": 0.8868195993883571,
+          "map50_95": 0.4727737742196133
+        }
+      ],
+      "primary_metric": {
+        "name": "map50_95",
+        "group": "B",
+        "value": 0.4727737742196133
+      }
+    }
+  },
+  "summary": {
+    "text": "task=detect; multimodal=dual, x_modality=ir, x_channels=3; primary=B.map50_95=0.4728; groups=[B: P=0.8716, R=0.8522, mAP50=0.8868, mAP50-95=0.4728]"
+  },
+  "integrity": {
+    "missing_fields": [],
+    "warnings": [
+      "per_class metrics not available"
+    ]
+  }
+}

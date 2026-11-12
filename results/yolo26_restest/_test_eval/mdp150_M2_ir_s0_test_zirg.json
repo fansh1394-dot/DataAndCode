@@ -1,0 +1,24 @@
+{
+  "tag": "mdp150_M2_ir_s0_test_zirg",
+  "weights": "YOLO26/ResTest/mdp150_M2_ir_s0/weights/best.pt",
+  "split": "test",
+  "labels_mode": "ir",
+  "derived_yaml": "/3250410011/root/rivermind-data/MutilModel_3485988898/_d2p1/eval_yamls/data_test_ir.yaml",
+  "is_dual_head": false,
+  "validator": "MultiModalDetectionValidator",
+  "imgsz": 640,
+  "batch": 16,
+  "late_route": false,
+  "zero_modality": "ir",
+  "zero_fill": 128.0,
+  "ir_shift": null,
+  "ir_rotate": 0.0,
+  "late_route_thresholds": null,
+  "metrics": {
+    "metrics/precision(B)": 0.9047010973127968,
+    "metrics/recall(B)": 0.8134057971014492,
+    "metrics/mAP50(B)": 0.8899932574364352,
+    "metrics/mAP50-95(B)": 0.6491665519868384,
+    "fitness": 0.6732492225317981
+  }
+}
