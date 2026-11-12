@@ -1,0 +1,97 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at_utc": "2026-10-22T19:26:56Z",
+  "experiment": {
+    "task": "detect",
+    "args": {
+      "epochs": 150,
+      "batch": 32,
+      "imgsz": 640,
+      "data": "../../../../../../root/rivermind-data/uav_data_v2/data.yaml",
+      "lr0": 0.01,
+      "optimizer": "auto",
+      "device": "0"
+    }
+  },
+  "model": {
+    "family": "YOLOMM",
+    "task": "detect",
+    "model_class": "DetectionModel",
+    "yaml": "last.pt",
+    "nc": 1,
+    "names": {
+      "0": "UAV"
+    },
+    "channels": 3
+  },
+  "multimodal": {
+    "enabled": true,
+    "mode": "dual",
+    "modality": null,
+    "models": [
+      "rgb",
+      "ir"
+    ],
+    "x_modality": "ir",
+    "x_channels": 3,
+    "modalities": {
+      "rgb": "images",
+      "ir": "images_ir"
+    }
+  },
+  "data": {
+    "data_cfg": "../../../../../../root/rivermind-data/uav_data_v2/data.yaml",
+    "data_dict": {
+      "path": "/root/rivermind-data/uav_data_v2",
+      "train": "/3250410011/root/rivermind-data/uav_data_v2/images/train",
+      "val": "/3250410011/root/rivermind-data/uav_data_v2/images/val",
+      "test": "/3250410011/root/rivermind-data/uav_data_v2/images/test",
+      "nc": 1,
+      "Xch": 3
+    }
+  },
+  "final_validation": {
+    "checkpoint": {
+      "best": "/3250410011/root/rivermind-data/MutilModel_3485988898/ResTest/v2c_E1_rgbonly_s1/weights/best.pt",
+      "last": "/3250410011/root/rivermind-data/MutilModel_3485988898/ResTest/v2c_E1_rgbonly_s1/weights/last.pt"
+    },
+    "metrics_raw": {
+      "metrics/precision(B)": 0.9863765872988086,
+      "metrics/recall(B)": 0.9873989576186273,
+      "metrics/mAP50(B)": 0.9922020161838113,
+      "metrics/mAP50-95(B)": 0.7122096258479356
+    },
+    "metrics_normalized": {
+      "task": "detect",
+      "groups": [
+        {
+          "group": "B",
+          "raw_keys": {
+            "precision": "metrics/precision(B)",
+            "recall": "metrics/recall(B)",
+            "map50": "metrics/mAP50(B)",
+            "map50_95": "metrics/mAP50-95(B)"
+          },
+          "precision": 0.9863765872988086,
+          "recall": 0.9873989576186273,
+          "map50": 0.9922020161838113,
+          "map50_95": 0.7122096258479356
+        }
+      ],
+      "primary_metric": {
+        "name": "map50_95",
+        "group": "B",
+        "value": 0.7122096258479356
+      }
+    }
+  },
+  "summary": {
+    "text": "task=detect; multimodal=dual, x_modality=ir, x_channels=3; primary=B.map50_95=0.7122; groups=[B: P=0.9864, R=0.9874, mAP50=0.9922, mAP50-95=0.7122]"
+  },
+  "integrity": {
+    "missing_fields": [],
+    "warnings": [
+      "per_class metrics not available"
+    ]
+  }
+}
