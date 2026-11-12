@@ -1,0 +1,173 @@
+# -*- coding: utf-8 -*-
+"""旋转鲁棒性测试：把 test 集按固定角度旋转，同步旋转标注框，重建图像目录。
+
+为什么要造新数据而不是在评测时变换：
+  eval_split.py 走的是标准 dataset 管线，没有「评测期旋转」入口。
+  造一份物理上已旋转的图像+标签目录最直接，且能复用现有评测代码，
+  不会引入任何评测口径差异。
+
+关键约束
+--------
+RGB 与 IR 必须**同角度旋转**，否则对齐破坏、结果无意义。
+标签也要同步旋转（中心点绕图像中心旋转，宽高在 90° 的倍数下互换；
+任意角度下用旋转后外接框近似）。
+
+输出结构（与 mendeley_split 平行）：
+  /3250410011/root/rivermind-data/mendeley_rot{ANG}/
+      images/{test}/  images_ir/{test}/  labels/{test}/  labels_ir/{test}/
+      data.yaml   metadata/test.json
+
+用法：
+  python _make_rot_testset.py --angle 15
+  python _make_rot_testset.py --angle 30
+"""
+import argparse
+import json
+import shutil
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+SRC = Path("/3250410011/root/rivermind-data/mendeley_split")
+ROOT_OUT = Path("/3250410011/root/rivermind-data")
+
+
+def rot_boxes_xywhn(boxes, angle, w=1.0, h=1.0):
+    """归一化 xywh 绕图像中心旋转，返回旋转后的外接框（归一化 xywh）。
+
+    任意角度下，旋转矩形的外接框边长：
+      W' = |w*cos| + |h*sin|,  H' = |w*sin| + |h*cos|
+    （归一化坐标下 w/h 已按原图宽高归一，故需先换到像素再换回）
+    """
+    t = np.deg2rad(angle)
+    c, s = abs(np.cos(t)), abs(np.sin(t))
+    out = []
+    for cx, cy, bw, bh in boxes:
+        # 换到像素空间计算外接框，避免长宽比失真
+        px, py = cx * w, cy * h
+        pw, ph = bw * w, bh * h
+        nw = pw * c + ph * s
+        nh = pw * s + ph * c
+        # 中心点绕图像中心旋转。
+        # 必须与 cv2.getRotationMatrix2D 同向：其返回矩阵为
+        #   [ cos  sin ; -sin  cos ]，即 x'=cos*x+sin*y, y'=-sin*x+cos*y。
+        # 早期版本写成 [cos -sin; sin cos]（旋转矩阵的转置），
+        # 导致标注反向旋转 2θ，rot15/30 的 mAP 全部塌到 ~0.003。
+        dx, dy = px - w / 2, py - h / 2
+        rx = dx * np.cos(t) + dy * np.sin(t) + w / 2
+        ry = -dx * np.sin(t) + dy * np.cos(t) + h / 2
+        # 夹到图像内
+        x1 = max(0.0, rx - nw / 2)
+        y1 = max(0.0, ry - nh / 2)
+        x2 = min(w, rx + nw / 2)
+        y2 = min(h, ry + nh / 2)
+        if x2 - x1 < 1 or y2 - y1 < 1:
+            continue
+        out.append(((x1 + x2) / 2 / w, (y1 + y2) / 2 / h,
+                    (x2 - x1) / w, (y2 - y1) / h))
+    return out
+
+
+def rotate_image(img, angle):
+    h, w = img.shape[:2]
+    M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+    # 保持与原图同尺寸：边界填充 0（黑），与「IR 置黑」实验同口径
+    return cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_LINEAR,
+                          borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+
+
+def process(split, angle, out_root):
+    stats = {"images": 0, "labels": 0, "missing": 0}
+    for sub in ("images", "images_ir", "labels", "labels_ir"):
+        (out_root / sub / split).mkdir(parents=True, exist_ok=True)
+
+    img_dir = SRC / "images" / split
+    ir_dir = SRC / "images_ir" / split
+
+    for img_path in sorted(img_dir.glob("*.png")):
+        stem = img_path.stem
+
+        # --- 主模态（RGB）---
+        rgb = cv2.imread(str(img_path))
+        if rgb is None:
+            stats["missing"] += 1
+            continue
+        h, w = rgb.shape[:2]
+        cv2.imwrite(str(out_root / "images" / split / img_path.name),
+                    rotate_image(rgb, angle), [cv2.IMWRITE_PNG_COMPRESSION, 3])
+
+        # --- X 模态（IR）：必须同角度 ---
+        ir_path = ir_dir / img_path.name
+        if ir_path.exists():
+            ir = cv2.imread(str(ir_path))
+            if ir is not None:
+                cv2.imwrite(str(out_root / "images_ir" / split / img_path.name),
+                            rotate_image(ir, angle), [cv2.IMWRITE_PNG_COMPRESSION, 3])
+
+        # --- 标签（原有标签目录 labels/labels_ir，与图像同名 .txt）---
+        for lsub in ("labels", "labels_ir"):
+            src_lbl = SRC / lsub / split / f"{stem}.txt"
+            dst_lbl = out_root / lsub / split / f"{stem}.txt"
+            if not src_lbl.exists():
+                dst_lbl.write_text("", encoding="utf-8")
+                continue
+            lines = [l for l in src_lbl.read_text().splitlines() if l.strip()]
+            boxes, classes = [], []
+            for line in lines:
+                p = line.split()
+                if len(p) >= 5:
+                    classes.append(int(p[0]))
+                    boxes.append(tuple(float(x) for x in p[1:5]))
+            nb = rot_boxes_xywhn(boxes, angle, w, h)
+            # 旋转后若框被裁掉大半，该类实例可能丢失——如实写回剩余框
+            dst_lbl.write_text(
+                "\n".join(f"{c} {b[0]:.6f} {b[1]:.6f} {b[2]:.6f} {b[3]:.6f}"
+                          for c, b in zip(classes, nb)) + ("\n" if nb else ""),
+                encoding="utf-8")
+            stats["labels"] += 1
+
+        stats["images"] += 1
+    return stats
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--angle", type=float, required=True, help="旋转角度（度），正值逆时针")
+    ap.add_argument("--splits", default="test", help="逗号分隔，如 test 或 test,val")
+    args = ap.parse_args()
+
+    angle = args.angle
+    tag = f"rot{int(angle)}"
+    out_root = ROOT_OUT / f"mendeley_{tag}"
+
+    if out_root.exists():
+        print(f"[RM] 已存在，先删除: {out_root}")
+        shutil.rmtree(out_root)
+
+    for split in args.splits.split(","):
+        split = split.strip()
+        st = process(split, angle, out_root)
+        print(f"  {split}: {st}")
+
+    # data.yaml：与源一致，只改 path
+    src_yaml = (SRC / "data.yaml").read_text(encoding="utf-8")
+    new_yaml = src_yaml.replace(str(SRC), str(out_root))
+    (out_root / "data.yaml").write_text(new_yaml, encoding="utf-8")
+
+    # metadata：复用源，is_synthetic 保持不变（合成与否不因旋转改变）
+    (out_root / "metadata").mkdir(parents=True, exist_ok=True)
+    for split in args.splits.split(","):
+        split = split.strip()
+        mf = SRC / "metadata" / f"{split}.json"
+        if mf.exists():
+            (out_root / "metadata" / f"{split}.json").write_text(
+                mf.read_text(encoding="utf-8"), encoding="utf-8")
+
+    print(f"\n完成: {out_root}")
+    print(f"  data.yaml -> {out_root / 'data.yaml'}")
+    print(f"  评测: --data {out_root / 'data.yaml'} --split test")
+
+
+if __name__ == "__main__":
+    main()

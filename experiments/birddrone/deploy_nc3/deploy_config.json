@@ -1,0 +1,40 @@
+{
+  "version": "nc3-2026-11-11",
+  "weights": "mdp150_M0BD_nc3_s0/weights/best.pt",
+  "onnx": "model_2in.onnx",
+  "rknn": "model_nc3_rk3588.rknn",
+  "rknn_size_mb": 8.0,
+  "int8_cos_min": 0.99641,
+  "inputs": [
+    {"name": "rgb", "channels": 3, "size": 640, "layout": "NHWC", "dtype": "uint8",
+     "mean": [0, 0, 0], "std": [255, 255, 255]},
+    {"name": "ir", "channels": 3, "size": 640, "layout": "NHWC", "dtype": "uint8",
+     "mean": [0, 0, 0], "std": [255, 255, 255]}
+  ],
+  "letterbox_fill": 114,
+  "outputs": {
+    "names": ["p3", "p4", "p5"],
+    "strides": [8, 16, 32],
+    "channels": 7,
+    "layout": "4 box + 3 cls",
+    "class_names": ["bird", "drone", "other"]
+  },
+  "alarm": {
+    "tau_drone": 0.5,
+    "vote_K": 5,
+    "vote_N": 3,
+    "min_side_px": 16,
+    "small_label": "small/unknown",
+    "cooldown_ms": 3000,
+    "drone_alarm": true,
+    "bird_alarm": false,
+    "other_alarm": false
+  },
+  "notes": [
+    "模型已从单路 6ch 改为 rgb/ir 双输入（板端两路相机直接送入，无需先拼接）",
+    "int8 模拟器 cos 最低 0.99641（5 个样本，3 个输出），达到 >=0.99",
+    "tau_drone=0.5 来自 E32：A 级(>=16px) bird/other 误告警 0、drone 告警 100%",
+    "<16px 目标按 C 层处理，标 small/unknown 不告警",
+    "板端解码复用现有 v26 raw 特征图解码（4 通道框 + 3 分类），需把类别数从 1 改为 3"
+  ]
+}

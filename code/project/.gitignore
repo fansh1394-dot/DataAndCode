@@ -1,0 +1,181 @@
+# 620c2cf3-1e1a-49ec-88da-d1195be9d3c9 # OMX directory
+.omx/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev-debug.log
+
+# Dependency directories
+node_modules/
+ResTest/*
+.vibedev/
+# Environment variables
+.env
+frompack/
+datatest/
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.promptx/
+.prompt/
+*.zip
+# OS specific
+.DS_Store
+# Exclude ultralytics directories (不要上传到git)
+ultralyticsmm/ultralytics_list/
+ultralyticsmm/ultralytics/
+test/*
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+ultralytics/nn/extra_modules/
+ultralytics/nn/backbone/
+# 允许多输出主干包装器被跟踪（用于 RTDETRMM 迁移）
+!ultralytics/nn/backbone/
+!ultralytics/nn/backbone/__init__.py
+!ultralytics/nn/backbone/timm_backbone.py
+!ultralytics/nn/backbone/convnextv2.py
+!ultralytics/nn/backbone/repvit.py
+!ultralytics/nn/backbone/EfficientFormerV2.py
+!ultralytics/nn/backbone/efficientViT.py
+!ultralytics/nn/backbone/SwinTransformer.py
+# PyTorch models
+*.pt
+*.pth
+*.onnx
+*.engine
+*.tflite
+*.pb
+*.h5
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+test*.py
+!test_yolomm_*.py
+test/test_yolomm_semseg_*.py
+!test/test_checkpoint_precision_contract.py
+!test/test_rtdetrmm_obb_contract.py
+!test/test_multimodal_mosaic_sampling.py
+!test_output_to_target_plotting.py
+yaml_migration_smoke_test.py
+
+# Data and media files
+datasets/
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.gif
+*.mp4
+*.avi
+*.mov
+!wiki/**/*.jpg
+!wiki/**/*.jpeg
+!wiki/**/*.png
+!wiki/**/*.bmp
+!wiki/**/*.gif
+!wiki/**/*.mp4
+!wiki/**/*.avi
+!wiki/**/*.mov
+
+# Training runs
+runs/
+wandb/
+*.csv
+
+# Temp files
+*.tmp
+*.temp
+.cache/
+tests/
+
+# Task Master
+.taskmaster/
+
+# Project specific files to ignore
+AGENTS.md
+CLAUDE.md
+.claude/
+.codex/
+todotask.md
+extra.md
+todebug.md
+mutilmodel-project.md
+.serena/
+Debug/
+ref/
+
+# 允许多模态 OBB 模块的预测器被跟踪
+!ultralytics/models/yolo/multimodal/obb/predict.py
+
+# Test config files
+test-mm.yaml
+
+# HTML files
+*.html
+!wiki/**/*.html
+
+# Distillation test artifacts
+DistillExp/
+
+# Pruning experiment artifacts
+PruneExp/
+distill_s2n.yaml
+distill_rgb_teacher.yaml
+distill.yaml
+_debug_prune.py
+.codex/config.toml
+error_report.txt
+deploy_scripts.json
+
+# Local-only automation state
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/codex/session_*.json
+.claude/codex/*.jsonl
+
+# SSH Manager audit logs
+.ssh-manager/
+
+# Documentation — docs 独立 git 管理，不进主仓
+docs/

@@ -1,0 +1,1095 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+import contextlib
+import pickle
+import re
+import types
+from copy import deepcopy
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+# Extra modules conditional import（默认禁用）
+# from ultralytics.nn.extra_modules import *
+# from ultralytics.nn.backbone.convnextv2 import *
+# from ultralytics.nn.backbone.fasternet import *
+# from ultralytics.nn.backbone.efficientViT import *
+# from ultralytics.nn.backbone.EfficientFormerV2 import *
+# from ultralytics.nn.backbone.VanillaNet import *
+# from ultralytics.nn.backbone.revcol import *
+# from ultralytics.nn.backbone.lsknet import *
+# from ultralytics.nn.backbone.SwinTransformer import *
+# from ultralytics.nn.backbone.repvit import *
+# from ultralytics.nn.backbone.CSwomTramsformer import *
+# from ultralytics.nn.backbone.UniRepLKNet import *
+# from ultralytics.nn.backbone.TransNext import *
+# from ultralytics.nn.backbone.rmt import *
+# from ultralytics.nn.backbone.pkinet import *
+# from ultralytics.nn.backbone.mobilenetv4 import *
+# from ultralytics.nn.backbone.starnet import *
+# from ultralytics.nn.backbone.inceptionnext import *
+# from ultralytics.nn.extra_modules.mobileMamba.mobilemamba import *
+# from ultralytics.nn.backbone.MambaOut import *
+# from ultralytics.nn.backbone.overlock import *
+# from ultralytics.nn.backbone.lsnet import *
+# except:
+#     pass
+from ultralytics.nn.autobackend import check_class_names
+from ultralytics.nn.mm.utils import MM_METADATA_KEY, MM_X_MODALITY_KEY, has_multimodal_config, sync_x_modality_name_to_model
+from ultralytics.nn.backbone import (
+    TimmBackbone,
+    convnextv2_atto,
+    convnextv2_base,
+    convnextv2_femto,
+    convnextv2_huge,
+    convnextv2_large,
+    convnextv2_nano,
+    convnextv2_pico,
+    convnextv2_tiny,
+    repvit_m0_9,
+    repvit_m1_0,
+    repvit_m1_1,
+    repvit_m1_5,
+    repvit_m2_3,
+    efficientformerv2_s0,
+    efficientformerv2_s1,
+    efficientformerv2_s2,
+    efficientformerv2_l,
+    EfficientViT_M0,
+    EfficientViT_M1,
+    EfficientViT_M2,
+    EfficientViT_M3,
+    EfficientViT_M4,
+    EfficientViT_M5,
+    SwinTransformer_Tiny,
+)
+from ultralytics.nn.modules import (
+    # non-fusion modules (keep explicit import)
+    AIFI,
+    AIFI_DyT,
+    AIFI_EDFFN,
+    AIFI_LPE,
+    AIFI_Mona,
+    AIFI_RepBN,
+    AIFI_SEFFN,
+    AIFI_SEFN,
+    TransformerEncoderLayer_AdditiveTokenMixer,
+    TransformerEncoderLayer_ASSA,
+    TransformerEncoderLayer_ASSA_SEFN,
+    TransformerEncoderLayer_ASSA_SEFN_Mona,
+    TransformerEncoderLayer_ASSA_SEFN_Mona_DyT,
+    TransformerEncoderLayer_DAttention,
+    TransformerEncoderLayer_DHSA,
+    TransformerEncoderLayer_DPB,
+    TransformerEncoderLayer_EfficientAdditiveAttnetion,
+    TransformerEncoderLayer_HiLo,
+    TransformerEncoderLayer_LocalWindowAttention,
+    TransformerEncoderLayer_MSLA,
+    TransformerEncoderLayer_MSMHSA,
+    TransformerEncoderLayer_Pola,
+    TransformerEncoderLayer_Pola_EDFFN_Mona_DyT,
+    TransformerEncoderLayer_Pola_SEFFN_Mona_DyT,
+    TransformerEncoderLayer_Pola_SEFN,
+    TransformerEncoderLayer_Pola_SEFN_Mona,
+    TransformerEncoderLayer_Pola_SEFN_Mona_DyT,
+    TransformerEncoderLayer_TSSA,
+    C1,
+    C2,
+    C2PSA,
+    C3,
+    C3TR,
+    ELAN1,
+    OBB,
+    OBB26,
+    PSA,
+    SPP,
+    SPPELAN,
+    SPPF,
+    A2C2f,
+    AConv,
+    ADown,
+    ACA,
+    BasicBlock,
+    Blocks,
+    Bottleneck,
+    BottleneckCSP,
+    C2f,
+    C2fAttn,
+    C2fCIB,
+    C2fPSA,
+    C3Ghost,
+    C3k2,
+    C3x,
+    CBFuse,
+    CBLinear,
+    Classify,
+    Concat,
+    Conv,
+    Conv2,
+    ConvNormLayer,
+    ConvTranspose,
+    FourierConv,
+    Detect,
+    FSConv,
+    v8Detect,
+    DWConv,
+    DWConvTranspose2d,
+    Focus,
+    GhostBottleneck,
+    GhostConv,
+    HGBlock,
+    HGStem,
+    ImagePoolingAttn,
+    Index,
+    MCFGatedFusion,
+    # YOLO-RD modules (kept explicit only for non-fusion entries)
+    LRPCHead,
+    Pose,
+    Pose26,
+    RepC3,
+    RepConv,
+    RepNCSPELAN4,
+    RepVGGDW,
+    ResNetLayer,
+    RTDETRBottleNeck,
+    RTDETRDecoder,
+    RTDETROBB,
+    SCDown,
+    Segment,
+    SemSegHead,
+    Depth,
+    Segment26,
+    MRCB,
+    TorchVision,
+    WorldDetect,
+    YOLOEDetect,
+    YOLOESegment,
+    v10Detect,
+    v26Detect,
+    get_activation,
+)
+
+# Import all fusion modules from the dedicated fusion package to avoid missing symbols
+# and keep tasks.py decoupled from individual fusion module names.
+from ultralytics.nn.modules.fusion import *  # noqa: F401,F403
+from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, YAML, colorstr, emojis
+from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
+from ultralytics.utils.loss import (
+    E2EDetectLoss,
+    E2ELoss,
+    PoseLoss26,
+    SemSegLoss,
+    DepthLoss,
+    v8ClassificationLoss,
+    v8DetectionLoss,
+    v8OBBLoss,
+    v8PoseLoss,
+    v8SegmentationLoss,
+    resolve_detection_loss_profile,
+)
+from ultralytics.utils.ops import make_divisible
+from ultralytics.utils.patches import torch_load
+from ultralytics.utils.plotting import feature_visualization
+from ultralytics.utils.torch_utils import (
+    fuse_conv_and_bn,
+    fuse_deconv_and_bn,
+    initialize_weights,
+    intersect_dicts,
+    model_info,
+    scale_img,
+    smart_inference_mode,
+    time_sync,
+)
+
+# 多模态组件导入 (仅导入已迁移的组件)
+try:
+    from ultralytics.nn.mm import MultiModalRouter, MultiModalConfigParser
+    MULTIMODAL_AVAILABLE = True
+except ImportError:
+    MULTIMODAL_AVAILABLE = False
+
+_LSCD_IMPORT_ERROR = None
+# LSCD 检测头导入 (轻量化共享卷积检测头)
+try:
+    from ultralytics.nn.Head import (
+        Detect_LSCD,
+        Segment_LSCD,
+        Pose_LSCD,
+        OBB_LSCD,
+        Conv_GN,
+        Scale,
+    )
+    LSCD_AVAILABLE = True
+except ImportError as _err:
+    _LSCD_IMPORT_ERROR = _err
+    LSCD_AVAILABLE = False
+    LOGGER.warning(f"LSCD head import failed: {_err}")
+    def _missing_lscd(*args, **kwargs):
+        raise RuntimeError(f"LSCD head modules unavailable: {_err}")
+
+    for _name in ['Detect_LSCD', 'Segment_LSCD', 'Pose_LSCD', 'OBB_LSCD', 'Conv_GN', 'Scale']:
+        globals()[_name] = _missing_lscd
+
+# LSPCD 检测头导入 (轻量共享部分卷积检测头)
+_LSPCD_IMPORT_ERROR = None
+try:
+    from ultralytics.nn.Head.lspcd import (
+        Detect_LSPCD,
+        Segment_LSPCD,
+        Segment26_LSPCD,
+        OBB_LSPCD,
+        OBB26_LSPCD,
+        Pose_LSPCD,
+        Pose26_LSPCD,
+    )
+    LSPCD_AVAILABLE = True
+except ImportError as _err:
+    _LSPCD_IMPORT_ERROR = _err
+    LSPCD_AVAILABLE = False
+    LOGGER.warning(f"LSPCD head import failed: {_err}")
+    def _missing_lspcd(*args, **kwargs):
+        raise RuntimeError(f"LSPCD head modules unavailable: {_err}")
+    for _name in ['Detect_LSPCD', 'Segment_LSPCD', 'Segment26_LSPCD', 'OBB_LSPCD', 'OBB26_LSPCD', 'Pose_LSPCD', 'Pose26_LSPCD']:
+        globals()[_name] = _missing_lspcd
+
+# YOLO11 检测头变体导入（不需要编译/不依赖自定义 CUDA 扩展）
+# 注意：这些头会被 YAML 直接引用，因此必须在 tasks.py 全局可见（供 parse_model 的 globals()[m] 解析）。
+from ultralytics.nn.Head.yolo11_head_variants import (
+    Detect_AFPN_P2345,
+    Detect_AFPN_P2345_Custom,
+    Detect_AFPN_P345,
+    Detect_AFPN_P345_Custom,
+    DetectAux,
+    Detect_Efficient,
+    Detect_LADH,
+    Detect_LQE,
+    Detect_LSCD_LQE,
+    Detect_LSCSBD,
+    Detect_LSDECD,
+    Detect_MultiSEAM,
+    Detect_RSCD,
+    Detect_SEAM,
+    OBB_LADH,
+    OBB_LQE,
+    OBB_LSCD_LQE,
+    OBB_LSCSBD,
+    OBB_LSDECD,
+    OBB_RSCD,
+    Pose_LADH,
+    Pose_LQE,
+    Pose_LSCD_LQE,
+    Pose_LSCSBD,
+    Pose_LSDECD,
+    Pose_RSCD,
+    Segment_Efficient,
+    Segment_LADH,
+    Segment_LQE,
+    Segment_LSCD_LQE,
+    Segment_LSCSBD,
+    Segment_LSDECD,
+    Segment_RSCD,
+)
+
+# 双头 + 融合分支聚合头（RGB/IR/Fuse 三检测头）
+# 注意：必须在 tasks.py 全局可见，供 parse_model 通过 YAML 模块名解析与构建。
+try:
+    from ultralytics.nn.mm.dual_head import DualHeadFusionDetect
+    from ultralytics.nn.mm.reliable_fusion import ReliabilityAwareFusion
+
+    DUAL_HEAD_AVAILABLE = True
+except Exception as _dual_head_err:  # pragma: no cover - 依赖缺失时降级
+    DualHeadFusionDetect = None
+    ReliabilityAwareFusion = None
+    DUAL_HEAD_AVAILABLE = False
+    LOGGER.warning(f"DualHeadFusionDetect 导入失败，双头+融合架构不可用: {_dual_head_err}")
+
+# 多路损失（dual_loss）依赖 ultralytics.utils.loss，与 nn.tasks 存在导入环，
+# 故仅在 init_criterion() 中按需导入，此处只保留占位名。
+DualHeadDetectionLoss = None
+DualHeadFusionCriterion = None
+
+_SOEP_IMPORT_ERROR = None
+# SOEP 颈部模块导入 (小目标增强金字塔)
+try:
+    from ultralytics.nn.Neck import (
+        SPDConv,
+        FGM,
+        OmniKernel,
+        CSPOmniKernel,
+        SNI,
+        GSConvE,
+        MFM,
+    )
+    SOEP_AVAILABLE = True
+except ImportError as _err:
+    _SOEP_IMPORT_ERROR = _err
+    SOEP_AVAILABLE = False
+    LOGGER.warning(f"SOEP neck import failed: {_err}")
+    def _missing_soep(*args, **kwargs):
+        raise RuntimeError(f"SOEP neck modules unavailable: {_err}")
+
+    for _name in ['SPDConv', 'FGM', 'OmniKernel', 'CSPOmniKernel', 'SNI', 'GSConvE', 'MFM']:
+        globals()[_name] = _missing_soep
+
+_C3K2_IMPORT_ERROR = None
+
+# C3k2 Extraction 模块导入 (C3k2变体模块) — 精确子模块导入，避免聚合导入连带失败
+try:
+    from ultralytics.nn.extraction.c3k2_variants import (
+        # Batch 1
+        C3k2_Faster,
+        C3k2_PConv,
+        C3k2_ODConv,
+        C3k2_Faster_EMA,
+        C3k2_DBB,
+        C3k2_WDBB,
+        C3k2_DeepDBB,
+        # Batch 2
+        C3k2_CloAtt,
+        C3k2_SCConv,
+        C3k2_ScConv,
+        C3k2_EMSC,
+        C3k2_EMSCP,
+        # Batch 3
+        C3k2_ContextGuided,
+        C3k2_MSBlock,
+        C3k2_EMBC,
+        C3k2_EMA,
+        # Batch 4
+        C3k2_DLKA,
+        C3k2_DAttention,
+        C3k2_Parc,
+        C3k2_DWR,
+        C3k2_RFAConv,
+        # Batch 5
+        C3k2_RFCBAMConv,
+        C3k2_RFCAConv,
+        C3k2_FocusedLinearAttention,
+        C3k2_MLCA,
+        C3k2_AKConv,
+        # Batch 6
+        C3k2_UniRepLKNetBlock,
+        C3k2_DRB,
+        C3k2_DWR_DRB,
+        C3k2_AggregatedAtt,
+        C3k2_SWC,
+        # Batch 7
+        C3k2_iRMB,
+        C3k2_iRMB_Cascaded,
+        C3k2_iRMB_DRB,
+        C3k2_iRMB_SWC,
+        C3k2_DynamicConv,
+        # Batch 8
+        C3k2_GhostDynamicConv,
+        C3k2_RVB,
+        C3k2_RVB_SE,
+        C3k2_RVB_EMA,
+        # Batch 9
+        C3k2_PKIModule,
+        C3k2_PPA,
+        C3k2_Faster_CGLU,
+        C3k2_Star,
+        # Batch 10
+        C3k2_Star_CAA,
+        C3k2_EIEM,
+        C3k2_DEConv,
+        # Batch 11
+        C3k2_gConv,
+        C3k2_AdditiveBlock,
+        C3k2_AdditiveBlock_CGLU,
+        # Batch 12 - 新迁移
+        C3k2_RetBlock,
+        C3k2_Heat,
+        C3k2_WTConv,
+        C3k2_FMB,
+        C3k2_MSMHSA_CGLU,
+        C3k2_MogaBlock,
+        C3k2_SHSA,
+        C3k2_SHSA_CGLU,
+        C3k2_MutilScaleEdgeInformationEnhance,
+        C3k2_MutilScaleEdgeInformationSelect,
+        C3k2_FFCM,
+        C3k2_SMAFB,
+        C3k2_SMAFB_CGLU,
+        C3k2_MSM,
+        C3k2_HDRAB,
+        C3k2_RAB,
+        C3k2_LFE,
+        C3k2_IDWC,
+        C3k2_IDWB,
+        C3k2_CAMixer,
+        C3k2_LFEM,
+        C3k2_LEGM,
+    )
+    C3K2_EXTRACTION_AVAILABLE = True
+except ImportError as _err:
+    _C3K2_IMPORT_ERROR = _err
+    # 为后续逻辑提供占位，避免 NameError
+    C3k2_DAttention = C3k2_Parc = C3k2_FocusedLinearAttention = None
+    C3K2_EXTRACTION_AVAILABLE = False
+    LOGGER.warning(f"C3k2 extraction modules import failed: {_err}")
+
+_C2PSA_IMPORT_ERROR = None
+# C2PSA Extraction 模块导入 (C2PSA变体模块) — 精确子模块导入
+try:
+    from ultralytics.nn.extraction.c2psa_variants import (
+        # Batch 1 - 基础类和第一批变体
+        C2PSA,
+        C2fPSA,
+        C2BRA,
+        BRABlock,
+        # Batch 2 - 注意力机制变体
+        C2CGA,
+        CGABlock,
+        C2DA,
+        DABlock,
+        C2DPB,
+        DPBlock,
+        C2Pola,
+        Polalock,
+        C2TSSA,
+        TSSAlock,
+        # Batch 3 - 注意力机制变体 + 归一化增强变体
+        C2ASSA,
+        ASSAlock,
+        C2MSLA,
+        MSLAlock,
+        C2PSA_DYT,
+        PSABlock_DYT,
+        C2TSSA_DYT,
+        TSSAlock_DYT,
+        C2Pola_DYT,
+        Polalock_DYT,
+        # Batch 4 - FFN增强变体
+        C2PSA_FMFFN,
+        PSABlock_FMFFN,
+        C2PSA_CGLU,
+        PSABlock_CGLU,
+        C2PSA_SEFN,
+        PSABlock_SEFN,
+        C2PSA_SEFFN,
+        PSABlock_SEFFN,
+        C2PSA_EDFFN,
+        PSABlock_EDFFN,
+        # Batch 5 - Mona模块化注意力归一化 + 复合增强变体
+        C2PSA_Mona,
+        PSABlock_Mona,
+        C2TSSA_DYT_Mona,
+        TSSAlock_DYT_Mona,
+        C2TSSA_DYT_Mona_SEFN,
+        TSSAlock_DYT_Mona_SEFN,
+        C2TSSA_DYT_Mona_SEFFN,
+        TSSAlock_DYT_Mona_SEFFN,
+        C2TSSA_DYT_Mona_EDFFN,
+        TSSAlock_DYT_Mona_EDFFN,
+    )
+    C2PSA_EXTRACTION_AVAILABLE = True
+except ImportError as _err:
+    _C2PSA_IMPORT_ERROR = _err
+    C2PSA_EXTRACTION_AVAILABLE = False
+    LOGGER.warning(f"C2PSA extraction modules import failed: {_err}")
+    # 占位符，确保后续引用时抛出明确错误而非 NameError
+    def _missing_c2psa(*args, **kwargs):
+        raise RuntimeError(f"C2PSA extraction modules unavailable: {_err}")
+
+    for _name in [
+        'C2PSA', 'C2fPSA', 'C2BRA', 'BRABlock', 'C2CGA', 'CGABlock', 'C2DA', 'DABlock', 'C2DPB', 'DPBlock',
+        'C2Pola', 'Polalock', 'C2TSSA', 'TSSAlock', 'C2ASSA', 'ASSAlock', 'C2MSLA', 'MSLAlock', 'C2PSA_DYT',
+        'PSABlock_DYT', 'C2TSSA_DYT', 'TSSAlock_DYT', 'C2Pola_DYT', 'Polalock_DYT', 'C2PSA_FMFFN', 'PSABlock_FMFFN',
+        'C2PSA_CGLU', 'PSABlock_CGLU', 'C2PSA_SEFN', 'PSABlock_SEFN', 'C2PSA_SEFFN', 'PSABlock_SEFFN', 'C2PSA_EDFFN',
+        'PSABlock_EDFFN', 'C2PSA_Mona', 'PSABlock_Mona', 'C2TSSA_DYT_Mona', 'TSSAlock_DYT_Mona', 'C2TSSA_DYT_Mona_SEFN',
+        'TSSAlock_DYT_Mona_SEFN', 'C2TSSA_DYT_Mona_SEFFN', 'TSSAlock_DYT_Mona_SEFFN', 'C2TSSA_DYT_Mona_EDFFN', 'TSSAlock_DYT_Mona_EDFFN',
+    ]:
+        globals()[_name] = _missing_c2psa
+
+_SPPF_IMPORT_ERROR = None
+# SPPF Extraction 模块导入（SPPF 及空间池化/融合变体） — 精确子模块导入
+try:
+    from ultralytics.nn.extraction.sppf_base import (
+        # Batch 1 - 标准 SPPF 变体
+        SPPF_LSKA,
+        # Batch 2 - GOLD-YOLO 聚合/融合
+        PyramidPoolAgg,
+        PyramidPoolAgg_PCE,
+        SimFusion_3in,
+        SimFusion_4in,
+        AdvPoolFusion,
+        # Batch 3 - 注入/小波模块
+        IFM,
+        InjectionMultiSum_Auto_pool,
+        WaveletPool,
+        WaveletUnPool,
+    )
+    SPPF_EXTRACTION_AVAILABLE = True
+except ImportError as _err:
+    _SPPF_IMPORT_ERROR = _err
+    SPPF_EXTRACTION_AVAILABLE = False
+    LOGGER.warning(f"SPPF extraction modules import failed: {_err}")
+    def _missing_sppf(*args, **kwargs):
+        raise RuntimeError(f"SPPF extraction modules unavailable: {_err}")
+
+    for _name in ['SPPF_LSKA', 'PyramidPoolAgg', 'PyramidPoolAgg_PCE', 'SimFusion_3in', 'SimFusion_4in', 'AdvPoolFusion', 'IFM', 'InjectionMultiSum_Auto_pool', 'WaveletPool', 'WaveletUnPool']:
+        globals()[_name] = _missing_sppf
+
+# Other Base Extraction 模块导入（独立模块）— MROD-YOLO RFEM
+_OTHERBASE_IMPORT_ERROR = None
+try:
+    from ultralytics.nn.extraction.other_base import (
+        RFEM,
+    )
+    OTHERBASE_EXTRACTION_AVAILABLE = True
+except ImportError as _err:
+    _OTHERBASE_IMPORT_ERROR = _err
+    OTHERBASE_EXTRACTION_AVAILABLE = False
+    LOGGER.warning(f"Other base extraction modules import failed: {_err}")
+    def _missing_otherbase(*args, **kwargs):
+        raise RuntimeError(f"Other base extraction modules unavailable: {_err}")
+
+    for _name in ['RFEM']:
+        globals()[_name] = _missing_otherbase
+
+# LoGStem 模块导入 — 基于高斯-拉普拉斯算子的 Stem 模块
+try:
+    from ultralytics.nn.extraction.logstem import LoGStem, LoGStem2x, DRFD, Cut
+except ImportError:
+    def LoGStem(*args, **kwargs):
+        raise ImportError("LoGStem module not found. Please check installation.")
+    def LoGStem2x(*args, **kwargs):
+        raise ImportError("LoGStem2x module not found. Please check installation.")
+
+# 下采样模块导入（Downsample modules）— 条件导入，缺失时提供占位
+_DOWNSAMPLE_IMPORT_ERROR = None
+try:
+    from ultralytics.nn.sample.lawds import LAWDS
+    from ultralytics.nn.sample.edge_lawds import EdgeLAWDS
+    from ultralytics.nn.sample.freq_lawds import FreqLAWDS
+    from ultralytics.nn.sample.hwd import HWD
+    from ultralytics.nn.sample.router_lawds import RouterLAWDS
+    from ultralytics.nn.sample.v7down import V7DownSampling
+    DOWNSAMPLE_AVAILABLE = True
+except ImportError as _err:
+    _DOWNSAMPLE_IMPORT_ERROR = _err
+    DOWNSAMPLE_AVAILABLE = False
+    LOGGER.warning(f"Downsample modules import failed: {_err}")
+    def _missing_downsample(*args, **kwargs):
+        raise RuntimeError(f"Downsample modules unavailable: {_err}")
+    for _name in ['LAWDS', 'EdgeLAWDS', 'FreqLAWDS', 'HWD', 'RouterLAWDS', 'V7DownSampling']:
+        globals()[_name] = _missing_downsample
+
+# 上采样模块导入（Upsample modules）— 条件导入，缺失时提供占位
+_UPSAMPLE_IMPORT_ERROR = None
+try:
+    from ultralytics.nn.sample.carafe import CARAFE
+    from ultralytics.nn.sample.dysample import DySample
+    from ultralytics.nn.sample.dsub import DSUB
+    from ultralytics.nn.sample.converse2d_up import Converse2D_Up
+    from ultralytics.nn.sample.eucb_sc import EUCB_SC
+    UPSAMPLE_AVAILABLE = True
+except ImportError as _err:
+    _UPSAMPLE_IMPORT_ERROR = _err
+    UPSAMPLE_AVAILABLE = False
+    LOGGER.warning(f"Upsample modules import failed: {_err}")
+    def _missing_upsample(*args, **kwargs):
+        raise RuntimeError(f"Upsample modules unavailable: {_err}")
+    for _name in ['CARAFE', 'DySample', 'DSUB', 'Converse2D_Up', 'EUCB_SC']:
+        globals()[_name] = _missing_upsample
+
+# C2f Extraction 模块导入（Batch 01）— 不做自动降级：导入失败应直接显式报错
+from ultralytics.nn.extraction.c2f_variants import (
+    C2f_CAMixer,
+    C2f_Heat,
+    C2f_FMB,
+    C2f_MSMHSA_CGLU,
+    C2f_MogaBlock,
+    C2f_SHSA,
+    C2f_SHSA_CGLU,
+    C2f_HDRAB,
+    C2f_RAB,
+    C2f_FFCM,
+    C2f_SMAFB,
+    C2f_SMAFB_CGLU,
+    C2f_AP,
+    C2f_CSI,
+    C2f_gConv,
+    C2f_FCA,
+    C2f_FDConv,
+    C2f_FDT,
+    C2f_FourierConv,
+    C2f_GlobalFilter,
+    C2f_LSBlock,
+    C2f_Strip,
+    C2f_StripCGLU,
+    C2f_wConv,
+    # Batch 03
+    C2f_FasterFDConv,
+    C2f_FasterSFSConv,
+    C2f_Faster_KAN,
+    C2f_FAT,
+    C2f_SMPCGLU,
+    C2f_DBlock,
+    # Batch 04 (partial)
+    C2f_AdditiveBlock,
+    C2f_AdditiveBlock_CGLU,
+    C2f_IEL,
+    C2f_DTAB,
+    C2f_PFDConv,
+    C2f_SFSConv,
+    C2f_PSFSConv,
+    C2f_EBlock,
+    # Batch 04 (no-CUDA extras)
+    C2f_HFERB,
+    C2f_JDPM,
+    C2f_ETB,
+    C2f_SFHF,
+    C2f_MSM,
+    C2f_ELGCA,
+    C2f_ELGCA_CGLU,
+    C2f_LEGM,
+    C2f_LFEM,
+    C2f_ESC,
+    C2f_KAT,
+)
+
+# Public 即插即用注意力模块导入 — 条件导入，缺失时提供占位
+_PUBLIC_ATTN_IMPORT_ERROR = None
+try:
+    from ultralytics.nn.public.ca import CoordAtt
+    from ultralytics.nn.public.deformable_lka import DeformableLKA
+    from ultralytics.nn.public.ema_attn import EMA_Attention
+    from ultralytics.nn.public.lsk import LSKBlock, LSKBlock_SA
+    # 新一批 public 即插即用模块
+    from ultralytics.nn.public.adaptive_rectangular_conv import AdaptiveRectangularConv
+    from ultralytics.nn.public.cghalfconv import CGHalfConv
+    from ultralytics.nn.public.convutr import ConvUtr
+    from ultralytics.nn.public.fdsm import FDSM
+    from ultralytics.nn.public.fremlp import FreMLP
+    from ultralytics.nn.public.gated_bottleneck_conv import GatedBottleneckConv
+    from ultralytics.nn.public.inverse_conv2d import InverseConv2DLayer
+    from ultralytics.nn.public.mkpconv import MKPConv
+    from ultralytics.nn.public.mrfa import MRFA
+    from ultralytics.nn.public.poly_kernel_inception import Poly_Kernel_Inception_Block
+    from ultralytics.nn.public.shift_module import Shift_Module
+    from ultralytics.nn.public.tbfe import TBFE
+    from ultralytics.nn.public.fcb import FCB
+    PUBLIC_ATTN_AVAILABLE = True
+except ImportError as _err:
+    _PUBLIC_ATTN_IMPORT_ERROR = _err
+    PUBLIC_ATTN_AVAILABLE = False
+    LOGGER.warning(f"Public attention modules import failed: {_err}")
+
+    def _missing_public_attn(*args, **kwargs):
+        raise RuntimeError(f"Public attention modules unavailable: {_err}")
+
+    for _name in ['CoordAtt', 'DeformableLKA', 'EMA_Attention', 'LSKBlock', 'LSKBlock_SA',
+                  'AdaptiveRectangularConv', 'CGHalfConv', 'ConvUtr', 'FDSM', 'FreMLP',
+                  'GatedBottleneckConv', 'InverseConv2DLayer', 'MKPConv', 'MRFA',
+                  'Poly_Kernel_Inception_Block', 'Shift_Module', 'TBFE', 'FCB']:
+        globals()[_name] = _missing_public_attn
+
+# ===== Attention 族类模块导入 =====
+_ATTENTION_IMPORT_ERROR = None
+try:
+    from ultralytics.nn.attention.channel import (
+        ACA, BinaryAttention, CASAB, CascadedGroupAtt, CascadedGroupAttention, CBSA,
+        DHPF, MaskUnitAttention, MCA, SimAM,
+        ChannelTransformerAttention, FCAttention,
+        ChannelReductionAttention,
+        DeformableInteractiveAttention, DualPoolCoordAttention,
+        GCBAM, LocalAttention, SCAM,
+        HighFreqDCTChannelAttention,
+        SMSSA, PCSA,
+    )
+    from ultralytics.nn.attention.frequency import (
+        ContrastDrivenFeatureAggregation, CTA, SFA, FSSA,
+        CPIA_SA, KSFA, FSA,
+        FSAS, MFCA,
+    )
+    from ultralytics.nn.attention.window import (
+        BiLevelRoutingAttention, DilatedGCSA, DilatedMWSA, DPWA,
+        DWM_MSA, DHOGSA, PatchSA, Token_Selective_Attention,
+        LocalRegionSelfAttention, StripeAttentionBlock,
+    )
+    from ultralytics.nn.attention.global_ import (
+        EfficientGlobalSA, LRSA, MALA, TAB,
+        GLSA, LWGA, CFBlock,
+        CAFM, DynamicRangeHistogramSelfAttention, EASA,
+        LSKNetAttention, MLKA, SHSA,
+        DynamicSpatialAttention, MaskAttention, MCC,
+        Multipole_Attention, SPRS, TopK_Sparse_Attention,
+        HDPA, ACFM, ESSA,
+    )
+    from ultralytics.nn.extraction import (
+        ChannelReallocationFFN, HFFE, StarBlock,
+        CED, LDE, LRCED, Multi_Scale_Feed_Forward_Network, PCFNBlock,
+        SAFM, GSAU, LKAT, DualScaleGatedFFN, DFFN,
+        BidomainNonlinearMapping, RCSABlock, MDCR,
+    )
+    ATTENTION_AVAILABLE = True
+except ImportError as _err:
+    _ATTENTION_IMPORT_ERROR = _err
+    ATTENTION_AVAILABLE = False
+    LOGGER.warning(f"Attention family modules import failed: {_err}")
+
+    def _missing_attention(*args, **kwargs):
+        raise RuntimeError(f"Attention family modules unavailable: {_err}")
+
+    for _name in [
+        'ACA', 'BinaryAttention', 'CASAB', 'CascadedGroupAtt', 'CascadedGroupAttention', 'CBSA',
+        'DHPF', 'MaskUnitAttention', 'MCA', 'SimAM',
+        'ContrastDrivenFeatureAggregation', 'CTA', 'SFA', 'FSSA',
+        'CPIA_SA', 'KSFA', 'FSA',
+        'BiLevelRoutingAttention', 'DilatedGCSA', 'DilatedMWSA', 'DPWA',
+        'DWM_MSA', 'DHOGSA', 'PatchSA', 'Token_Selective_Attention',
+        'EfficientGlobalSA', 'LRSA', 'MALA', 'TAB',
+        'GLSA', 'LWGA', 'CFBlock',
+        'CAFM', 'ChannelTransformerAttention', 'DynamicRangeHistogramSelfAttention',
+        'EASA', 'FCAttention',
+        'ChannelReductionAttention', 'FSAS', 'LSKNetAttention', 'MLKA', 'SHSA',
+        'ChannelReallocationFFN', 'HFFE', 'StarBlock',
+        'CED', 'LDE', 'LRCED', 'Multi_Scale_Feed_Forward_Network', 'PCFNBlock',
+        # 新一批 attention 模块
+        'DeformableInteractiveAttention', 'DualPoolCoordAttention', 'GCBAM',
+        'LocalAttention', 'SCAM', 'DynamicSpatialAttention', 'MaskAttention',
+        'MCC', 'Multipole_Attention', 'SPRS', 'TopK_Sparse_Attention',
+        'LocalRegionSelfAttention', 'StripeAttentionBlock',
+        'HighFreqDCTChannelAttention',
+        'SMSSA', 'PCSA', 'MFCA', 'HDPA', 'ACFM', 'ESSA',
+        'SAFM', 'GSAU', 'LKAT', 'DualScaleGatedFFN', 'DFFN',
+        'BidomainNonlinearMapping', 'RCSABlock', 'MDCR',
+    ]:
+        globals()[_name] = _missing_attention
+
+# ===== Mamba / SSM 族类模块导入 =====
+# 纯 PyTorch 类（GatedCNNBlock_BCHW / MobileMambaModule）与 mamba_ssm 依赖类统一容错导入；
+# 缺 mamba_ssm 时 5 个依赖类不导出（占位为 _missing_mamba），但 import 不崩溃。
+_MAMBA_IMPORT_ERROR = None
+try:
+    from ultralytics.nn.mamba import (
+        GatedCNNBlock_BCHW,
+        MobileMambaModule,
+        MambaVisionBlock,
+        TransMambaBlock,
+        VSSBlock,
+        Mamba2Block,
+        EVSSM,
+    )
+    MAMBA_AVAILABLE = True
+except ImportError as _err:
+    _MAMBA_IMPORT_ERROR = _err
+    MAMBA_AVAILABLE = False
+    LOGGER.warning(f"Mamba/SSM family modules import failed: {_err}")
+
+    def _missing_mamba(*args, **kwargs):
+        raise RuntimeError(f"Mamba/SSM family modules unavailable: {_err}")
+
+    for _name in [
+        'GatedCNNBlock_BCHW', 'MobileMambaModule',
+        'MambaVisionBlock', 'TransMambaBlock',
+        'VSSBlock', 'Mamba2Block', 'EVSSM',
+    ]:
+        globals()[_name] = _missing_mamba
+
+_NECK_IMPORT_ERROR = None
+# Neck 模块导入（AFPN/HSFPN/CFPT/BiPAN 等） — 精确子模块导入
+try:
+    from ultralytics.nn.Neck import (
+        AFPN_P345,
+        AFPN_P345_Custom,
+        AFPN_P2345,
+        AFPN_P2345_Custom,
+        HFP,
+        SDP,
+        SDP_Improved,
+        ChannelAttention_HSFPN,
+        ELA_HSFPN,
+        CA_HSFPN,
+        CAA_HSFPN,
+        CrossLayerSpatialAttention,
+        CrossLayerChannelAttention,
+        FreqFusion,
+        LocalSimGuidedSampler,
+        Fusion,
+        SDI,
+        CSPStage,
+        BiFusion,
+        OREPANCSPELAN4,
+        SBA,
+        EUCB,
+        MSDC,
+        MSCB,
+        CSP_MSCB,
+        # MSIA 多尺度迭代聚合模块 (MROD-YOLO)
+        MCA,
+        MSIA,
+        # CTrans 跨尺度通道 Transformer (AAAI 2022)
+        ChannelTransformer,
+        # HyperComputeModule 超图计算模块 (TPAMI 2025)
+        HyperComputeModule,
+        HyPConv,
+        # FDPN 频率动态金字塔网络
+        FocusFeature,
+        DynamicFrequencyFocusFeature,
+        AlignmentGuidedFocusFeature,
+        # GoldYOLO Transformer 聚合注入融合
+        # 注意: AdvPoolFusion/IFM/InjectionMultiSum_Auto_pool/PyramidPoolAgg/SimFusion_3in/SimFusion_4in
+        # 已在 sppf_base 中注册，此处仅补充 TopBasicLayer
+        TopBasicLayer,
+        # SlimNeck 轻量化 Neck
+        GSConv,
+        GSBottleneck,
+        GSBottleneckC,
+        VoVGSCSP,
+        HaarWavelet,
+        WFU,
+        # ASF 注意力尺度融合 (arXiv 2312.06458)
+        Add,
+        ScalSeq,
+        Zoom_cat,
+        asf_attention_model,
+    )
+    NECK_EXTRACTION_AVAILABLE = True
+except ImportError as _err:
+    _NECK_IMPORT_ERROR = _err
+    NECK_EXTRACTION_AVAILABLE = False
+    LOGGER.warning(f"Neck modules import failed: {_err}")
+    def _missing_neck(*args, **kwargs):
+        raise RuntimeError(f"Neck modules unavailable: {_err}")
+
+    for _name in [
+        'AFPN_P345', 'AFPN_P345_Custom', 'AFPN_P2345', 'AFPN_P2345_Custom', 'HFP', 'SDP', 'SDP_Improved',
+        'ChannelAttention_HSFPN', 'ELA_HSFPN', 'CA_HSFPN', 'CAA_HSFPN', 'CrossLayerSpatialAttention',
+        'CrossLayerChannelAttention', 'FreqFusion', 'LocalSimGuidedSampler', 'Fusion', 'SDI', 'CSPStage', 'BiFusion',
+        'OREPANCSPELAN4', 'SBA', 'EUCB', 'MSCB', 'CSP_MSCB', 'MCA', 'MSIA',
+        # CTrans
+        'ChannelTransformer',
+        # HyperCompute
+        'HyperComputeModule', 'HyPConv',
+        # FDPN
+        'FocusFeature', 'DynamicFrequencyFocusFeature', 'AlignmentGuidedFocusFeature',
+        # GoldYOLO
+        'AdvPoolFusion', 'IFM', 'InjectionMultiSum_Auto_pool',
+        'PyramidPoolAgg', 'SimFusion_3in', 'SimFusion_4in', 'TopBasicLayer',
+        # SlimNeck
+        'GSConv', 'GSBottleneck', 'GSBottleneckC', 'VoVGSCSP',
+        # ASF
+        'Add', 'ScalSeq', 'Zoom_cat', 'asf_attention_model',
+    ]:
+        globals()[_name] = _missing_neck
+
+# ===== Head Class Sets (align with upstream behavior) =====
+# 统一以集合方式识别检测/分割/姿态/旋转头，便于在 parse_model/_apply/stride 推断等位置一致处理。
+DETECT_CLASS: tuple = (
+    Detect,
+    v8Detect,
+    WorldDetect,
+    YOLOEDetect,
+    v10Detect,
+    v26Detect,
+    ImagePoolingAttn,
+)
+SEGMENT_CLASS: tuple = (
+    Segment,
+    Segment26,
+    YOLOESegment,
+)
+POSE_CLASS: tuple = (Pose, Pose26)
+OBB_CLASS: tuple = (OBB, OBB26)
+SEMSEG_CLASS: tuple = (SemSegHead,)
+DEPTH_CLASS: tuple = (Depth,)
+
+# 动态扩展 LSCD 系列头
+if LSCD_AVAILABLE:
+    DETECT_CLASS = DETECT_CLASS + (Detect_LSCD,)
+    SEGMENT_CLASS = SEGMENT_CLASS + (Segment_LSCD,)
+    POSE_CLASS = POSE_CLASS + (Pose_LSCD,)
+    OBB_CLASS = OBB_CLASS + (OBB_LSCD,)
+
+# 动态扩展 LSPCD 系列头（轻量共享部分卷积检测头）
+if LSPCD_AVAILABLE:
+    DETECT_CLASS = DETECT_CLASS + (Detect_LSPCD,)
+    SEGMENT_CLASS = SEGMENT_CLASS + (Segment_LSPCD, Segment26_LSPCD)
+    POSE_CLASS = POSE_CLASS + (Pose_LSPCD, Pose26_LSPCD)
+    OBB_CLASS = OBB_CLASS + (OBB_LSPCD, OBB26_LSPCD)
+
+# YOLO11 头部变体（无需编译）
+DETECT_CLASS = DETECT_CLASS + (
+    Detect_AFPN_P345,
+    Detect_AFPN_P345_Custom,
+    Detect_AFPN_P2345,
+    Detect_AFPN_P2345_Custom,
+    Detect_Efficient,
+    DetectAux,
+    Detect_SEAM,
+    Detect_MultiSEAM,
+    Detect_LADH,
+    Detect_LSCSBD,
+    Detect_LSDECD,
+    Detect_RSCD,
+    Detect_LQE,
+    Detect_LSCD_LQE,
+)
+SEGMENT_CLASS = SEGMENT_CLASS + (
+    Segment_Efficient,
+    Segment_LADH,
+    Segment_LSCSBD,
+    Segment_LSDECD,
+    Segment_RSCD,
+    Segment_LQE,
+    Segment_LSCD_LQE,
+)
+POSE_CLASS = POSE_CLASS + (
+    Pose_LADH,
+    Pose_LSCSBD,
+    Pose_LSDECD,
+    Pose_RSCD,
+    Pose_LQE,
+    Pose_LSCD_LQE,
+)
+OBB_CLASS = OBB_CLASS + (
+    OBB_LADH,
+    OBB_LSCSBD,
+    OBB_LSDECD,
+    OBB_RSCD,
+    OBB_LQE,
+    OBB_LSCD_LQE,
+)
+
+# ===== Neck Module Class Sets =====
+NECK_CLASS: tuple = ()
+if NECK_EXTRACTION_AVAILABLE:
+    NECK_CLASS = (
+        AFPN_P345,
+        AFPN_P345_Custom,
+        AFPN_P2345,
+        AFPN_P2345_Custom,
+        HFP,
+        SDP,
+        SDP_Improved,
+        ChannelAttention_HSFPN,
+        ELA_HSFPN,
+        CA_HSFPN,
+        CAA_HSFPN,
+        CrossLayerSpatialAttention,
+        CrossLayerChannelAttention,
+        FreqFusion,
+        LocalSimGuidedSampler,
+        Fusion,
+        SDI,
+        CSPStage,
+        BiFusion,
+        OREPANCSPELAN4,
+        SBA,
+        EUCB,
+        MSCB,
+        CSP_MSCB,
+        # CTrans 跨尺度通道 Transformer
+        ChannelTransformer,
+        # HyperComputeModule 超图计算
+        HyperComputeModule,
+        HyPConv,
+        # FDPN 频率动态金字塔
+        FocusFeature,
+        DynamicFrequencyFocusFeature,
+        AlignmentGuidedFocusFeature,
+        # GoldYOLO 聚合注入融合
+        AdvPoolFusion,
+        IFM,
+        InjectionMultiSum_Auto_pool,
+        PyramidPoolAgg,
+        SimFusion_3in,
+        SimFusion_4in,
+        TopBasicLayer,
+        # SlimNeck 轻量化
+        GSConv,
+        GSBottleneck,
+        GSBottleneckC,
+        VoVGSCSP,
+        # ASF 注意力尺度融合
+        Add,
+        ScalSeq,
+        Zoom_cat,
+        asf_attention_model,
+    )
+
+# ===== C3k2 Module Class Sets =====
+# 统一以集合方式识别C3k2及其变体，便于在 parse_model/repeat_modules 等位置一致处理。
+C3K2_CLASS: tuple = (C3k2,)
+
+# 动态扩展 C3k2 Extraction 系列模块
+if C3K2_EXTRACTION_AVAILABLE:
+    C3K2_CLASS = C3K2_CLASS + (
+        # Batch 1
+        C3k2_Faster, C3k2_PConv, C3k2_ODConv, C3k2_Faster_EMA,
+        C3k2_DBB, C3k2_WDBB, C3k2_DeepDBB,
+        # Batch 2
+        C3k2_CloAtt, C3k2_SCConv, C3k2_ScConv,
+        C3k2_EMSC, C3k2_EMSCP,
+        # Batch 3
+        C3k2_ContextGuided, C3k2_MSBlock, C3k2_EMBC, C3k2_EMA,
+        # Batch 4
+        C3k2_DLKA, C3k2_DAttention, C3k2_Parc, C3k2_DWR, C3k2_RFAConv,
+        # Batch 5
+        C3k2_RFCBAMConv, C3k2_RFCAConv,
+        C3k2_FocusedLinearAttention, C3k2_MLCA, C3k2_AKConv,
+        # Batch 6
+        C3k2_UniRepLKNetBlock, C3k2_DRB, C3k2_DWR_DRB,
+        C3k2_AggregatedAtt, C3k2_SWC,
+        # Batch 7
+        C3k2_iRMB, C3k2_iRMB_Cascaded, C3k2_iRMB_DRB,
+        C3k2_iRMB_SWC, C3k2_DynamicConv,
+        # Batch 8
+        C3k2_GhostDynamicConv, C3k2_RVB, C3k2_RVB_SE, C3k2_RVB_EMA,
+        # Batch 9
+        C3k2_PKIModule, C3k2_PPA, C3k2_Faster_CGLU, C3k2_Star,
+        # Batch 10
+        C3k2_Star_CAA, C3k2_EIEM, C3k2_DEConv,
+        # Batch 11
+        C3k2_gConv, C3k2_AdditiveBlock, C3k2_AdditiveBlock_CGLU,
+        # Batch 12
+        C3k2_RetBlock, C3k2_Heat, C3k2_WTConv, C3k2_FMB,
+        C3k2_MSMHSA_CGLU, C3k2_MogaBlock, C3k2_SHSA, C3k2_SHSA_CGLU,
+        C3k2_MutilScaleEdgeInformationEnhance, C3k2_MutilScaleEdgeInformationSelect, C3k2_FFCM,
+        C3k2_SMAFB, C3k2_SMAFB_CGLU,
+        C3k2_MSM, C3k2_HDRAB, C3k2_RAB, C3k2_LFE,
+        C3k2_IDWC, C3k2_IDWB, C3k2_CAMixer,
+        C3k2_LFEM, C3k2_LEGM,  # LEGNet series
+    )
+
+# ===== SPPF Variant Class Set =====
+SPPF_CLASS: tuple = (SPPF,)
+if SPPF_EXTRACTION_AVAILABLE:
+    SPPF_CLASS = SPPF_CLASS + (SPPF_LSKA,)
+
+# ===== Upsample Module Class Set =====
+# 上采样模块集合，c2=ch[f]，args=[c2, *args]
+UPSAMPLE_CLASS: tuple = ()
+if UPSAMPLE_AVAILABLE:
+    UPSAMPLE_CLASS = (
+        CARAFE,
+        DySample,
+        DSUB,
+        Converse2D_Up,
+        EUCB_SC,
+    )
+
+# ===== C2PSA Module Class Sets =====
+# 统一以集合方式识别 C2PSA 及其变体，便于在 parse_model/repeat_modules 等位置一致处理。
+C2PSA_CLASS: tuple = ()
+if C2PSA_EXTRACTION_AVAILABLE:
+    C2PSA_CLASS = (C2PSA, C2fPSA) + (
+        # Batch 1/2/3 - 注意力主干变体
+        C2BRA, C2CGA, C2DA, C2DPB, C2Pola, C2TSSA, C2ASSA, C2MSLA,
+        C2PSA_DYT, C2TSSA_DYT, C2Pola_DYT,
+        # Batch 4 - FFN 增强
+        C2PSA_FMFFN, C2PSA_CGLU, C2PSA_SEFN, C2PSA_SEFFN, C2PSA_EDFFN,
+        # Batch 5 - Mona 复合增强
+        C2PSA_Mona, C2TSSA_DYT_Mona, C2TSSA_DYT_Mona_SEFN, C2TSSA_DYT_Mona_SEFFN, C2TSSA_DYT_Mona_EDFFN,
+    )
+
+# 万物皆可融 Block 类 — 从 extraction 包导入
+from ultralytics.nn.extraction.block_fusion import C3k_Block, C3_Block, C2f_Block, C3k2_Block
+
+# =========================================================================
+# 万物皆可融 Block 集合 — 独立于 base_modules，拥有专属 parse_model 分支
+# 支持通过 YAML dict 格式动态指定子模块: {'module': '类名', 'selfatt': bool, 'param': {...}}
+# 注意: 此集合不合�

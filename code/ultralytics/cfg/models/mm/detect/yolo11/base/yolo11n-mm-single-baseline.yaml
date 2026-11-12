@@ -1,0 +1,72 @@
+# 单模态基线（plain single-modal YAML，不含任何多模态路由/融合节点/双头）。
+#
+# 用途：为 E1（RGB-only）与 E2（IR-only）提供与融合模型**严格可比**的单模态分母。
+#
+# 设计原则（必须与融合模型可比）：
+#   1) 骨干 + neck 的层结构、通道数、深度宽度系数，与
+#      yolo11n-mm-dual-fusion-deform.yaml 的**单侧支路**逐层一致
+#      （backbone 层 0–10，neck 层 23–36）。
+#      这样「融合 vs 单模态」的差异只来自融合机制本身，而非模型容量。
+#   2) 只有一个 Detect 头（P3/P4/P5 三尺度），不含 fuse_ir 等额外头。
+#   3) 不含 MultimodalRouter / 融合节点，故 single_modal 构建期注入可用
+#      （prepare_multimodal_build_cfg 要求 YAML 无多模态配置）。
+#
+# 用法：
+#   RGB-only:  python train_full.py --model <此文件> --single-modal rgb ...
+#   IR-only :  python train_full.py --model <此文件> --single-modal ir  ...
+#
+# 为什么需要它：项目历史上从未训练过 RGB-only / IR-only 基线，
+# 导致「融合增益 +0.0074」这句话一直没有分母。没有这两个数，
+# 任何「融合是否有效」「哪种交付架构更好」的结论都无法成立。
+
+nc: 80
+scales:
+  n: [0.50, 0.25, 1024]
+  s: [0.50, 0.50, 1024]
+  m: [0.50, 1.00, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.50, 512]
+
+backbone:
+  # 与 dual-fusion-deform 的层 0–10 逐层一致
+  - [-1, 1, Conv, [64, 3, 2]]         # 0
+  - [-1, 1, Conv, [128, 3, 2]]        # 1
+  - [-1, 2, C3k2, [256, False, 0.25]] # 2
+  - [-1, 1, Conv, [256, 3, 2]]        # 3
+  - [-1, 2, C3k2, [512, False, 0.25]] # 4
+  - [-1, 1, Conv, [512, 3, 2]]        # 5
+  - [-1, 2, C3k2, [512, True]]        # 6
+  - [-1, 1, Conv, [1024, 3, 2]]       # 7
+  - [-1, 2, C3k2, [1024, True]]       # 8
+  - [-1, 1, SPPF, [1024, 5]]          # 9
+  - [-1, 2, C2PSA, [1024]]            # 10
+
+head:
+  # 与 dual-fusion-deform 的层 23–34（单侧 neck，共 12 层）逐层一致：
+  #   dual 层 23 [10, Upsample]   → 本文件层 11
+  #   dual 层 24 [[-1,6], Concat] → 本文件层 12
+  #   dual 层 25 C3k2             → 本文件层 13
+  #   dual 层 26 [Upsample]       → 本文件层 14
+  #   dual 层 27 [[-1,4], Concat] → 本文件层 15
+  #   dual 层 28 C3k2             → 本文件层 16   P3 输出
+  #   dual 层 29 Conv[256,3,2]    → 本文件层 17
+  #   dual 层 30 [[-1,24],Concat] → 本文件层 18   （down 到 P4 后与骨干 P4 拼接）
+  #   dual 层 31 C3k2             → 本文件层 19   P4 输出
+  #   dual 层 32 Conv[512,3,2]    → 本文件层 20
+  #   dual 层 33 [[-1,10],Concat] → 本文件层 21   （与骨干 P5 拼接）
+  #   dual 层 34 C3k2             → 本文件层 22   P5 输出
+  # 注意层 18 在单分支中引用的必须是「骨干 P4」= 层 6（dual 版写 24 是因为
+  # 它在前一侧 neck 里 P4 出现在层 24）。层号错位会直接导致 Concat 尺寸不匹配。
+  - [10, 1, nn.Upsample, [None, 2, "nearest"]]  # 11
+  - [[-1, 6], 1, Concat, [1]]                    # 12
+  - [-1, 2, C3k2, [512, False]]                  # 13
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]   # 14
+  - [[-1, 4], 1, Concat, [1]]                    # 15
+  - [-1, 2, C3k2, [256, False]]                  # 16  P3 输出
+  - [-1, 1, Conv, [256, 3, 2]]                   # 17
+  - [[-1, 6], 1, Concat, [1]]                    # 18  ← 骨干 P4（层 6）
+  - [-1, 2, C3k2, [512, False]]                  # 19  P4 输出
+  - [-1, 1, Conv, [512, 3, 2]]                   # 20
+  - [[-1, 10], 1, Concat, [1]]                   # 21  ← 骨干 P5（层 10）
+  - [-1, 2, C3k2, [1024, True]]                  # 22  P5 输出
+  - [[16, 19, 22], 1, Detect, [nc]]              # 23  单检测头（三尺度）

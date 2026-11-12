@@ -1,0 +1,1246 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+"""双头 + 融合分支的多路检测损失，以及 DFSC 目标级跨模态语义一致性损失。
+
+为什么需要这个模块
+------------------
+``v8DetectionLoss`` 的 target 构造只有一条通路::
+
+    targets = torch.cat((batch["batch_idx"], batch["cls"], batch["bboxes"]), 1)
+
+这决定了单个检测头只能接受**一套**标签。但 RGB 与 IR 是两个视场不同的相机，
+同一目标在两幅图中的像素位置系统性偏移（Anti-UAV300 实测：归一化中心偏差
+中位 3.62 pp、最大 10.85 pp），因此：
+
+- 用 RGB 标签监督 IR 头 → IR 图上框系统性错位，永远出不准；
+- 融合头没有独立监督 → 融合通道可能退化为"等于较好的单模态"，丧失互补性。
+
+本模块提供两件事：
+
+1. :class:`DualHeadDetectionLoss`
+   把各检测头的输出分别与**各自模态的标签**配对，计算多路检测损失：
+
+   ==========  ==========================  ==================
+   检测头       标签来源                     坐标系
+   ==========  ==========================  ==================
+   rgb         ``batch["bboxes"]``          RGB
+   ir          ``batch["bboxes_ir"]``       IR
+   fuse        ``batch["bboxes"]``          RGB（融合主坐标系）
+   fuse_ir     ``batch["bboxes_ir"]``       IR（B1 可选，见下）
+   ==========  ==========================  ==================
+
+   前三个头恒存在；``fuse_ir`` 仅在模型挂载了该头（``-b1`` 配置）时参与。
+
+关于 B1：融合头双坐标系监督
+-----------------------------
+原三头架构下融合头只用 RGB 标签监督，实测（困难子集 509 帧，仅 IR 可见）发现：
+融合颈的激活幅值（RGB 52.5% / IR 47.5%）与卷积权重切分（P4 49.9:50.1）都**均衡**，
+但把融合颈的 RGB 半边置零后融合头 mAP50 由 0.04486 **直接归零**。说明融合头并非
+"偏废 IR"，而是把 IR 当作 RGB 坐标系下的辅助线索，从未被要求独立成立。
+
+B1 的解法是给融合分支增设第二个检测头 ``fuse_ir``：复用**同一组**融合 neck 特征
+（47/49/51），但用 IR 坐标系标签监督。于是融合特征必须同时能解码出 RGB 系与 IR 系
+两组框，无法再退化为「RGB 坐标系下的辅助线索」。B1-2 进一步用
+``_pair_consistency`` 约束两头分类响应一致，防止同一特征在两个坐标系间自相矛盾。
+
+2. :class:`DualHeadFusionCriterion`
+   在 (1) 之上叠加 **DFSC**（Dual-modal Feature Semantic Consistency，
+   目标级跨模态语义一致性）损失，以及可选的跨头一致性正则。
+
+关于 DFSC
+---------
+DFSC 与仓库中既有的"空间对齐"损失**不是一回事**，不可复用：
+
+- 既有 ``distill/losses.py`` 的空间对齐（``F.interpolate``）解决的是
+  "两张特征图**尺寸**不一致"，属于几何层面的对齐；
+- DFSC 解决的是"同一目标在 RGB 与 IR 两条分支上的**语义表示**是否一致"，
+  属于目标级、内容层面的约束。
+
+实现方式：把两个检测头的**分类分支（cv3）输出**在**目标中心**处采样，
+以目标为锚点对齐（而非以像素位置对齐），再用余弦距离约束两模态表示一致。
+以目标为锚点这一点很关键——它天然免疫两模态之间的视场偏移，
+因为采样的依据是"同一个目标"，而不是"同一个像素坐标"。
+"""
+
+from __future__ import annotations
+
+import os
+
+from typing import Any, Dict, List, Optional, Tuple
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from ultralytics.utils import LOGGER
+from ultralytics.utils.loss import BboxLoss, TaskAlignedAssigner, xywh2xyxy
+from ultralytics.utils.tal import dist2bbox, make_anchors
+
+__all__ = ["DualHeadDetectionLoss", "DualHeadFusionCriterion", "DFSCLoss"]
+
+
+# ======================================================================
+# 默认权重（可被 hyp 覆盖）
+# ======================================================================
+DEFAULT_BRANCH_WEIGHTS = {"rgb": 1.0, "ir": 1.0, "fuse": 1.0, "fuse_ir": 1.0}
+#: 各分支标签来源：rgb→RGB 标签；ir→IR 标签；fuse→RGB 标签（融合主坐标系为 RGB）
+#:
+#: B1 (2026-09-27)：``fuse_ir`` 是融合头的**第二条监督通路**，用 IR 坐标系标签，
+#: 目的是让融合特征在 IR 坐标系下也「独立成立」，从而在 RGB 失效时可兜底。
+#: 它不参与推理（见 ``DualHeadFusionDetect.branch_order``）。
+BRANCH_LABEL_KEYS = {
+    "rgb": ("bboxes", "cls"),
+    "ir": ("bboxes_ir", "cls_ir"),
+    "fuse": ("bboxes", "cls"),
+    "fuse_ir": ("bboxes_ir", "cls_ir"),
+}
+
+
+def _one2many_of(raw: Any) -> Any:
+    """把检测头的原始输出统一解包成「训练用特征图列表」。
+
+    YOLO11 的 ``Detect`` 在训练态直接返回 ``List[Tensor]``；推理态返回
+    ``(y, List[Tensor])``。YOLO26 的 ``v26Detect`` 是端到端头，训练态返回
+    ``{"one2many": List[Tensor], "one2one": List[Tensor]}``，推理态返回
+    ``(y, {...})``。本损失只消费 **one2many**（密集监督），故统一在此解包，
+    使全部下游计算（``feats[0].shape``、``make_anchors(feats, ...)``）无需感知
+    头类型差异。
+
+    Args:
+        raw: 单个分支检测头的原始返回值。
+
+    Returns:
+        训练用特征图列表；无法识别时原样返回（让下游以原有方式报错，便于定位）。
+    """
+    if isinstance(raw, dict):
+        return raw.get("one2many", raw)
+    if isinstance(raw, tuple) and len(raw) == 2:
+        inner = raw[1]
+        if isinstance(inner, dict):
+            return inner.get("one2many", inner)
+        return inner
+    return raw
+
+
+def _one2one_of(raw: Any) -> Any:
+    """取出 YOLO26 端到端头的 one2one（NMS-free）特征图列表。
+
+    YOLO11 的 ``Detect`` 没有该分支，返回 ``None``；调用方据此跳过 o2o 损失。
+    """
+    if isinstance(raw, dict):
+        return raw.get("one2one")
+    if isinstance(raw, tuple) and len(raw) == 2:
+        inner = raw[1]
+        if isinstance(inner, dict):
+            return inner.get("one2one")
+    return None
+
+
+class _BranchDetectionLoss(nn.Module):
+    """单个检测头的检测损失（复用与 ``v8DetectionLoss`` 完全一致的 TAL 流程）。
+
+    只负责"一组特征图 + 一套标签 → (box, cls, dfl)"，不涉及任何模态逻辑，
+    因此可与多路调度解耦、单独测试。
+    """
+
+    def __init__(
+        self,
+        nc: int,
+        reg_max: int,
+        stride: torch.Tensor,
+        device: torch.device,
+        assigner: TaskAlignedAssigner,
+        bbox_loss: BboxLoss,
+        bce: nn.Module,
+        cls_loss_fn: nn.Module,
+        loss_cls_type: str,
+        hyp: Any,
+        use_dfl: bool = True,
+    ) -> None:
+        super().__init__()
+        self.nc = nc
+        self.reg_max = reg_max
+        self.no = nc + reg_max * 4
+        self.stride = stride
+        self.device = device
+        self.assigner = assigner
+        self.bbox_loss = bbox_loss
+        self.bce = bce
+        self.cls_loss_fn = cls_loss_fn
+        self.loss_cls_type = loss_cls_type
+        self.hyp = hyp
+        self.use_dfl = use_dfl
+        self.proj = torch.arange(reg_max, dtype=torch.float, device=device)
+        self.use_dfl = use_dfl
+
+    # ------------------------------------------------------------------
+    def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
+        """把 (N, 6) 的 targets 按图像分组并缩放到像素尺度（与 v8DetectionLoss 一致）。"""
+        nl, ne = targets.shape
+        if nl == 0:
+            return torch.zeros(batch_size, 0, ne - 1, device=self.device)
+        i = targets[:, 0]
+        _, counts = i.unique(return_counts=True)
+        counts = counts.to(dtype=torch.int32)
+        out = torch.zeros(batch_size, counts.max(), ne - 1, device=self.device)
+        for j in range(batch_size):
+            matches = i == j
+            if n := int(matches.sum()):
+                out[j, :n] = targets[matches, 1:]
+        out[..., 1:5] = xywh2xyxy(out[..., 1:5].mul_(scale_tensor))
+        return out
+
+    def bbox_decode(self, anchor_points: torch.Tensor, pred_dist: torch.Tensor) -> torch.Tensor:
+        """从分布预测解码出 xyxy 框。"""
+        if self.use_dfl:
+            b, a, c = pred_dist.shape
+            pred_dist = pred_dist.view(b, a, 4, c // 4).softmax(3).matmul(self.proj.type(pred_dist.dtype))
+        return dist2bbox(pred_dist, anchor_points, xywh=False)
+
+    # ------------------------------------------------------------------
+    def forward(
+        self,
+        feats: List[torch.Tensor],
+        gt_labels: torch.Tensor,
+        gt_bboxes: torch.Tensor,
+        mask_gt: torch.Tensor,
+        batch_size: int,
+        imgsz: torch.Tensor,
+        valid_mask: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """计算单个头在给定标签下的 (loss_vec, loss_items)。"""
+        no = feats[0].shape[1]
+        reg_max_x4 = no - self.nc
+        pred_distri, pred_scores = torch.cat(
+            [xi.view(feats[0].shape[0], no, -1) for xi in feats], 2
+        ).split((reg_max_x4, self.nc), 1)
+        pred_scores = pred_scores.permute(0, 2, 1).contiguous()
+        pred_distri = pred_distri.permute(0, 2, 1).contiguous()
+
+        anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
+
+        loss = torch.zeros(3, device=self.device, dtype=torch.float32)  # box, cls, dfl
+        pred_scores_f = pred_scores.float()
+        pred_distri_f = pred_distri.float()
+        anchor_points_f = anchor_points.float()
+        stride_tensor_f = stride_tensor.float()
+
+        pred_bboxes_f = self.bbox_decode(anchor_points_f, pred_distri_f)
+
+        if valid_mask is None:
+            valid_mask = torch.ones(batch_size, dtype=torch.bool, device=pred_scores_f.device)
+        else:
+            valid_mask = valid_mask.to(device=pred_scores_f.device, dtype=torch.bool).view(batch_size)
+        # 无效模态的图像既不能产生正样本，也不能产生“全图背景”负样本梯度。
+        # 这一步在 assigner 前屏蔽 GT，后面还会按图像屏蔽分类损失。
+        #
+        # dtype 说明：mask_gt 来自 gt_bboxes.sum(2, keepdim=True).gt_(0.0)。
+        # .gt_() 是「原地」比较，在多数 torch 版本上会把张量就地改成 bool，
+        # 但在部分版本/后端组合下会保留浮点 dtype（1.0/0.0）。此时若直接写
+        #   mask_gt & valid_mask[:, None, None]
+        # 两侧 dtype 提升为 Float，就会在 CUDA 上调用 bitwise_and(float) 并抛出
+        #   NotImplementedError: "bitwise_and_cuda" not implemented for 'Float'
+        # 因此这里显式把两侧都归一化为 bool 再做按位与：
+        #   0/0.0 -> False、非 0 -> True，与 .gt_(0.0) 的语义完全一致，
+        #   也与 assigner 内部 `mask_gt = mask_gt.bool()` 的处理保持一致
+        #   （见 ultralytics/utils/tal.py 的 get_box_metrics）。
+        mask_gt = mask_gt.bool() & valid_mask[:, None, None].bool()
+
+        _, target_bboxes, target_scores, fg_mask, _ = self.assigner(
+            pred_scores_f.detach().sigmoid(),
+            (pred_bboxes_f.detach() * stride_tensor_f).type(gt_bboxes.dtype),
+            anchor_points_f * stride_tensor_f,
+            gt_labels,
+            gt_bboxes,
+            mask_gt,
+        )
+
+        target_scores_sum = max(target_scores.sum(), 1)
+        target_scores_f = target_scores.to(torch.float32)
+
+        if self.loss_cls_type == "focal":
+            cls_raw = self.cls_loss_fn(pred_scores_f, target_scores_f)
+        else:
+            cls_raw = self.cls_loss_fn(pred_scores_f, target_scores_f)
+        # cls_raw: (B, anchors, nc). Keep the reduction explicit so invalid images
+        # contribute exactly zero rather than a background BCE term.
+        cls_raw = cls_raw * valid_mask[:, None, None].to(cls_raw.dtype)
+        loss[1] = cls_raw.sum() / target_scores_sum
+
+        if not bool(valid_mask.any()):
+            zero = (pred_scores_f.sum() + pred_distri_f.sum()) * 0.0
+            loss.zero_()
+            return loss * batch_size + zero, loss.detach()
+
+        if fg_mask.sum():
+            target_bboxes = target_bboxes / stride_tensor_f
+            loss[0], loss[2] = self.bbox_loss(
+                pred_distri_f, pred_bboxes_f, anchor_points_f, target_bboxes,
+                target_scores, target_scores_sum, fg_mask,
+            )
+
+        loss[0] *= self.hyp.box
+        loss[1] *= self.hyp.cls
+        loss[2] *= self.hyp.dfl
+
+        return loss * batch_size, loss.detach()
+
+
+class DFSCLoss(nn.Module):
+    """DFSC：目标级跨模态语义一致性损失。
+
+    核心思想
+    --------
+    对**同一个目标**，RGB 分支与 IR 分支应当学到语义一致的表示。由于两模态存在
+    视场偏移，逐像素对齐是不可行的；本损失改以**目标中心**为锚点采样两分支的特征，
+    从而免疫空间错位。
+
+    同时对同一目标在两模态下的分类响应分布施加一致性约束（软标签层面的对齐），
+    使两个头对"这个目标是什么"的判断趋于一致。
+
+    Args:
+        mode (str): 采样方式。
+            - ``"cls"``：在分类分支（cv3）输出上采样（默认，语义信息最集中）
+            - ``"feat"``：在 neck 特征图上采样（更底层，计算开销更大）
+        temperature (float): 余弦相似度缩放温度，越大越严格。
+        detach_ir (bool): 是否对 IR 分支做 detach（默认 False，让两分支都收到梯度）。
+        eps (float): 数值稳定项。
+
+    Examples:
+        >>> dfs = DFSCLoss()
+        >>> a = torch.randn(2, 8, 3, 3); b = torch.randn(2, 8, 3, 3)
+        >>> boxes = torch.tensor([[0.5, 0.5, 0.2, 0.2]])
+        >>> float(dfs(a, b, boxes)) >= 0.0
+        True
+    """
+
+    def __init__(
+        self,
+        mode: str = "cls",
+        temperature: float = 1.0,
+        detach_ir: bool = False,
+        eps: float = 1e-6,
+    ) -> None:
+        super().__init__()
+        if mode not in ("cls", "feat"):
+            raise ValueError(f"DFSCLoss mode 必须是 'cls' 或 'feat'，实得 {mode}")
+        self.mode = mode
+        self.temperature = float(temperature)
+        self.detach_ir = bool(detach_ir)
+        self.eps = float(eps)
+
+    @staticmethod
+    def _sample_at_points(feat: torch.Tensor, points_xy: torch.Tensor) -> torch.Tensor:
+        """在归一化坐标 ``points_xy``（范围 [0,1]）处双线性采样特征。
+
+        Args:
+            feat (Tensor): ``(B, C, H, W)`` 特征图。
+            points_xy (Tensor): ``(B, N, 2)``，归一化 (x, y)。
+
+        Returns:
+            (Tensor): ``(B, N, C)`` 采样结果。
+        """
+        b, c, h, w = feat.shape
+        if points_xy.numel() == 0:
+            return feat.new_zeros((b, 0, c))
+        # grid_sample 要求 grid 坐标在 [-1, 1]
+        grid = points_xy.clamp(0.0, 1.0) * 2.0 - 1.0  # (B, N, 2)
+        grid = grid.unsqueeze(2)  # (B, N, 1, 2) -> (x, y)
+        grid = grid.to(dtype=feat.dtype, device=feat.device)  # DFSC fix: grid 须与 feat 同设备/同 dtype
+        sampled = F.grid_sample(feat, grid, mode="bilinear", align_corners=False, padding_mode="border")
+        # sampled: (B, C, N, 1) -> (B, N, C)
+        return sampled.squeeze(-1).permute(0, 2, 1).contiguous()
+
+    def forward(
+        self,
+        feat_rgb: torch.Tensor,
+        feat_ir: torch.Tensor,
+        boxes_rgb_norm: torch.Tensor,
+        boxes_ir_norm: Optional[torch.Tensor] = None,
+        batch_idx_rgb: Optional[torch.Tensor] = None,
+        batch_idx_ir: Optional[torch.Tensor] = None,
+        valid_rgb: Optional[torch.Tensor] = None,
+        valid_ir: Optional[torch.Tensor] = None,
+        gt_batch_idx: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """计算目标级跨模态语义一致性损失。
+
+        Args:
+            feat_rgb (Tensor): RGB 分支特征图 ``(B, C, H, W)``（用首个尺度即可）。
+            feat_ir (Tensor): IR 分支特征图 ``(B, C, H, W)``，形状需与 RGB 一致。
+            boxes_rgb_norm (Tensor): ``(N, 4)`` RGB 坐标系归一化 xywh 框。
+            boxes_ir_norm (Tensor, optional): ``(M, 4)`` IR 坐标系归一化 xywh 框。
+                省略时为兼容旧调用，复用 RGB 框（不推荐用于非对齐数据）。
+            batch_idx_rgb/batch_idx_ir (Tensor, optional): 两套框各自的帧索引。
+            valid_rgb/valid_ir (Tensor, optional): 每帧模态有效性；无效帧不参与 DFSC。
+            gt_batch_idx (Tensor, optional): 旧接口别名，等价于 batch_idx_rgb。
+
+        Returns:
+            (Tensor): 标量损失。无有效目标时返回 0（保持计算图可反传）。
+        """
+        if feat_rgb.shape != feat_ir.shape or feat_rgb.dim() != 4:
+            raise ValueError(
+                f"DFSC 要求两模态特征图形状一致，实得 rgb={tuple(feat_rgb.shape)} ir={tuple(feat_ir.shape)}"
+            )
+        if boxes_ir_norm is None:
+            boxes_ir_norm = boxes_rgb_norm
+        if batch_idx_rgb is None and gt_batch_idx is not None:
+            batch_idx_rgb = gt_batch_idx
+        if batch_idx_ir is None:
+            batch_idx_ir = batch_idx_rgb
+        if boxes_rgb_norm.numel() == 0 or boxes_ir_norm.numel() == 0:
+            return (feat_rgb.sum() + feat_ir.sum()) * 0.0
+
+        b = feat_rgb.shape[0]
+        if batch_idx_rgb is None:
+            batch_idx_rgb = torch.zeros(boxes_rgb_norm.shape[0], device=boxes_rgb_norm.device, dtype=torch.long)
+        else:
+            batch_idx_rgb = batch_idx_rgb.long()
+        if batch_idx_ir is None:
+            batch_idx_ir = torch.zeros(boxes_ir_norm.shape[0], device=boxes_ir_norm.device, dtype=torch.long)
+        else:
+            batch_idx_ir = batch_idx_ir.long()
+
+        if valid_rgb is None:
+            valid_rgb = torch.ones(b, dtype=torch.bool, device=feat_rgb.device)
+        else:
+            valid_rgb = valid_rgb.to(feat_rgb.device, dtype=torch.bool).view(-1)
+        if valid_ir is None:
+            valid_ir = torch.ones(b, dtype=torch.bool, device=feat_rgb.device)
+        else:
+            valid_ir = valid_ir.to(feat_rgb.device, dtype=torch.bool).view(-1)
+
+        # RGB/IR 分别在自己的相机坐标系取中心；这里绝不能直接把 RGB 中心套到 IR 特征图。
+        #
+        # device 说明：batch 里的标签张量由 dataloader collate 产出、默认留在 CPU
+        # （多模态 preprocess_batch 只把 img 搬到 device），而下面是用 **device 上**的
+        # sel_rgb/sel_ir 去索引 centers_*。检测损失在 _prepare_targets 里自行
+        # `.to(self.device)` 所以不受影响，DFSC 走的是原始 batch 键，必须在此显式归一化，
+        # 否则抛
+        #   RuntimeError: indices should be either on cpu or on the same device
+        #   as the indexed tensor (cpu)
+        # 该异常被 DualHeadFusionCriterion 捕获成 WARNING 后整轮跳过，会让 dfs_weight>0
+        # 的实验静默退化成 dfs_weight=0，故此处不能只转 dtype。
+        centers_rgb = boxes_rgb_norm[:, :2].to(device=feat_rgb.device, dtype=feat_rgb.dtype)
+        centers_ir = boxes_ir_norm[:, :2].to(device=feat_ir.device, dtype=feat_ir.dtype)
+
+        if self.detach_ir:
+            feat_ir = feat_ir.detach()
+
+        losses = []
+        for j in range(b):
+            if j >= valid_rgb.numel() or j >= valid_ir.numel() or not bool(valid_rgb[j] and valid_ir[j]):
+                continue
+            sel_rgb = batch_idx_rgb.to(feat_rgb.device) == j
+            sel_ir = batch_idx_ir.to(feat_ir.device) == j
+            n = min(int(sel_rgb.sum()), int(sel_ir.sum()))
+            if n <= 0:
+                continue
+            # Anti-UAV300 基本为一帧一个目标；多目标时按标注顺序配对，
+            # 后续可替换为 Hungarian matching，而不改变双坐标采样接口。
+            pts_rgb = centers_rgb[sel_rgb][:n].unsqueeze(0)
+            pts_ir = centers_ir[sel_ir][:n].unsqueeze(0)
+            f_rgb = self._sample_at_points(feat_rgb[j: j + 1], pts_rgb)
+            f_ir = self._sample_at_points(feat_ir[j: j + 1], pts_ir)
+            # 逐目标余弦距离：语义一致 -> 1 - cos 趋于 0
+            cos = F.cosine_similarity(f_rgb, f_ir, dim=-1, eps=self.eps)  # (1, Nj)
+            losses.append((1.0 - cos).mean())
+
+        if not losses:
+            return (feat_rgb.sum() + feat_ir.sum()) * 0.0
+        return torch.stack(losses).mean() * self.temperature
+
+
+class DualHeadDetectionLoss(nn.Module):
+    """双头 + 融合分支的多路检测损失。
+
+    与 ``v8DetectionLoss`` 的接口保持一致（``__call__(preds, batch) -> (loss_vec, loss_items)``），
+    因此可直接替换到训练循环中。
+
+    Args:
+        model: 已 de-parallel 的检测模型（其 ``model[-1]`` 为 ``DualHeadFusionDetect``）。
+        branch_weights (dict, optional): 各分支权重，默认均为 1.0。
+        tal_topk (int): TaskAlignedAssigner 的 topk。
+
+    Examples:
+        >>> # 通常由 DetectionModel.init_criterion() 自动构建，无需手动实例化
+        >>> isinstance(criterion, DualHeadDetectionLoss)
+        True
+    """
+
+    def __init__(
+        self,
+        model: nn.Module,
+        branch_weights: Optional[Dict[str, float]] = None,
+        tal_topk: int = 10,
+        tal_metric: str = "iou",
+        end2end: bool = False,
+        prog_loss: bool = True,
+        tal_topk2: Optional[int] = None,
+        tal_stride: Optional[List[int]] = None,
+    ) -> None:
+        super().__init__()
+        device = next(model.parameters()).device
+        h = model.args
+        head = model.model[-1]
+
+        if not hasattr(head, "_branch_modules"):
+            raise TypeError(
+                f"DualHeadDetectionLoss 需要 model[-1] 为 DualHeadFusionDetect，实得 {type(head).__name__}"
+            )
+
+        self.head = head
+        self.bce = nn.BCEWithLogitsLoss(reduction="none")
+        self.hyp = h
+        self.device = device
+        self.nc = int(head.nc)
+        self.reg_max = int(head.reg_max)
+        self.no = self.nc + self.reg_max * 4
+        self.use_dfl = self.reg_max > 1
+        self.stride = head.rgb_detect.stride
+        # B1 (2026-09-27)：必须用 train_branch_names（含可选的 fuse_ir），
+        # **不能**用 branch_order —— 后者只含推理分支，会漏掉 fuse_ir 的监督。
+        # 未启用 B1 时 train_branch_names == ("rgb","ir","fuse")，与改造前等价。
+        self.branch_names = list(
+            getattr(head, "train_branch_names", None) or head.branch_order
+        )
+
+        self.branch_weights = dict(DEFAULT_BRANCH_WEIGHTS)
+        if branch_weights:
+            for k, v in branch_weights.items():
+                if k in self.branch_weights:
+                    self.branch_weights[k] = float(v)
+
+        # B4-b：伪融合根因修复开关。开启时，被 RGB 半边屏蔽的样本，其 fuse 头改用
+        # IR 坐标系标签监督（详见 _resolve_fuse_label_keys）。默认 True —— 该修复只在
+        # 同时开启融合颈屏蔽（mm_fusion_rgb_mask_p>0）时才有样本命中，其余情况逐位不变。
+        self.fuse_ir_label_on_mask = bool(getattr(h, "mm_fuse_ir_label_on_mask", True))
+        self.last_fuse_label_switched = 0
+
+        # 判别实验（2026-10-14）：fuse 头无条件改用 IR 坐标系标签监督。
+        # 用于「冻结骨干、只训融合颈+融合头」的坐标系判别：若把 supervise 坐标切到
+        # IR 系后，掩码探针下 fuse 头回升，则瓶颈在监督坐标系而非融合算子。
+        self.fuse_ir_label_always = bool(getattr(h, "mm_fuse_ir_label_always", False))
+
+        # 损失配置（与 v8DetectionLoss 保持一致的解析方式）
+        from ultralytics.utils.loss import v8DetectionLoss as _V8
+
+        cls_type_raw = getattr(h, "loss_cls", None)
+        self.loss_cls_type = _V8._resolve_loss_cls(cls_type_raw) if hasattr(_V8, "_resolve_loss_cls") else (cls_type_raw or "bce")
+        if not isinstance(self.loss_cls_type, str):
+            self.loss_cls_type = "bce"
+        self.loss_box_type = BboxLoss._validate_iou_type(getattr(h, "loss_box", "ciou"))
+        self.loss_dfl_enabled = bool(getattr(h, "loss_dfl", True))
+        self.cls_loss_fn = _resolve_cls_loss_fn(self.loss_cls_type, self.bce)
+
+        # YOLO26 端到端：v26Detect 同时输出 one2many（密集监督）与 one2one（NMS-free）。
+        # 若只监督 one2many，one2one 分支永远拿不到梯度，推理时 (y, ...) 里的端到端
+        # 结果就是未训练的随机输出。因此端到端聚合头必须两套都算。
+        self.end2end = bool(end2end)
+        self.prog_loss = bool(prog_loss) and self.end2end
+        # ProgLoss 渐进权重（与 utils.loss.E2ELoss 完全一致：o2m 0.8->0.1，o2o 0.2->0.9）
+        self.o2m = 0.8
+        self.o2o = 1.0 - self.o2m
+        self.final_o2m = 0.1
+        self.updates = 0
+
+        def _make_criterion(name: str, topk: int) -> "_BranchDetectionLoss":
+            crit = _BranchDetectionLoss(
+                nc=self.nc,
+                reg_max=self.reg_max,
+                stride=head.branch(name).stride,
+                device=device,
+                assigner=TaskAlignedAssigner(
+                    topk=topk,
+                    topk2=tal_topk2,
+                    stride=tal_stride,
+                    num_classes=self.nc,
+                    alpha=0.5,
+                    beta=6.0,
+                    metric=tal_metric,
+                ),
+                bbox_loss=BboxLoss(self.reg_max, iou_type=self.loss_box_type).to(device),
+                bce=self.bce,
+                cls_loss_fn=self.cls_loss_fn,
+                loss_cls_type=self.loss_cls_type,
+                hyp=h,
+                use_dfl=self.use_dfl,
+            )
+            if not self.loss_dfl_enabled:
+                crit.bbox_loss.dfl_loss = None
+            return crit
+
+        # 每个分支一套独立 criterion（参数共享同一 assigner 配置，但 bbox_loss 各自实例）
+        # tal_metric="geoshape" 时启用 COXNet 的 GeoShape 相似度做标签分配（见 tal.py）。
+        self.branch_criteria = nn.ModuleDict()
+        for name in self.branch_names:
+            self.branch_criteria[name] = _make_criterion(name, tal_topk)
+
+        # one2one 分支：与 E2ELoss 一致，topk 收紧（10 -> 7），迫使每个 GT 只匹配
+        # 少量高质量 anchor，模拟 NMS-free 推理时的「一目标一预测」口径。
+        if self.end2end:
+            self.branch_criteria_o2o = nn.ModuleDict()
+            for name in self.branch_names:
+                self.branch_criteria_o2o[name] = _make_criterion(name, 7)
+        else:
+            self.branch_criteria_o2o = None
+
+        LOGGER.info(
+            f"DualHeadDetectionLoss: nc={self.nc}, branches={self.branch_names}, "
+            f"weights={self.branch_weights}, cls={self.loss_cls_type}, box={self.loss_box_type}, "
+            f"assign_metric={tal_metric}, end2end={self.end2end}, prog_loss={self.prog_loss}"
+        )
+
+    # ------------------------------------------------------------------
+    def update(self) -> None:
+        """按 epoch 推进 ProgLoss 权重（由 trainer 每轮调用，接口与 ``E2ELoss.update`` 一致）。"""
+        if not self.prog_loss:
+            return
+        self.updates += 1
+        epochs = int(getattr(self.hyp, "epochs", 100) or 100)
+        self.o2m = max(1 - self.updates / max(epochs - 1, 1), 0) * (0.8 - self.final_o2m) + self.final_o2m
+        self.o2o = max(1.0 - self.o2m, 0.0)
+
+    # ------------------------------------------------------------------
+    def _prepare_targets(
+        self,
+        batch: Dict[str, torch.Tensor],
+        batch_size: int,
+        scale_tensor: torch.Tensor,
+        box_key: str,
+        cls_key: str,
+        valid_key: Optional[str] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, bool, torch.Tensor]:
+        """按指定键构造某分支的 (gt_labels, gt_bboxes, mask_gt, has_target)。
+
+        与 ``v8DetectionLoss`` 的 L777-780 完全对等，只是把 ``"bboxes"``/``"cls"``
+        换成该分支自己的键。缺失键时返回全空目标（该分支退化为纯背景监督）。
+
+        Args:
+            batch (dict): 训练 batch。
+            batch_size (int): 批大小。
+            scale_tensor (Tensor): 归一化坐标 -> 像素坐标的缩放系数，
+                顺序须为 ``[W, H, W, H]``（与 ``v8DetectionLoss`` 一致）。
+            box_key (str): 框标签键（如 ``"bboxes"`` / ``"bboxes_ir"``）。
+            cls_key (str): 类别标签键（如 ``"cls"`` / ``"cls_ir"``）。
+
+        Returns:
+            tuple: ``(gt_labels, gt_bboxes, mask_gt, has_target, valid_mask)``。
+        """
+        valid_mask = batch.get(valid_key or "valid_rgb", None)
+        if valid_mask is None:
+            valid_mask = torch.ones(batch_size, dtype=torch.bool, device=self.device)
+        else:
+            valid_mask = valid_mask.to(self.device, dtype=torch.bool).view(batch_size)
+        if box_key not in batch or cls_key not in batch:
+            empty = torch.zeros(batch_size, 0, 1, device=self.device)
+            return empty, torch.zeros(batch_size, 0, 4, device=self.device), \
+                torch.zeros(batch_size, 0, 1, device=self.device), False, valid_mask
+
+        boxes = batch[box_key]
+        clses = batch[cls_key]
+        if boxes.numel() == 0:
+            empty = torch.zeros(batch_size, 0, 1, device=self.device)
+            return empty, torch.zeros(batch_size, 0, 4, device=self.device), \
+                torch.zeros(batch_size, 0, 1, device=self.device), False, valid_mask
+
+        # 双头修复: IR 头必须用 IR 标签自带的帧索引 batch_idx_ir(RGB 与 IR 目标数可不同, 不能共用 batch_idx)
+        # B4-b：fuse 头的合并标签自带 __fuse_batch_idx__，必须优先使用。
+        if box_key == "__fuse_boxes__":
+            bi_key = "__fuse_batch_idx__"
+        elif box_key == "bboxes_ir":
+            bi_key = "batch_idx_ir"
+        else:
+            bi_key = "batch_idx"
+        targets = torch.cat(
+            (batch[bi_key].view(-1, 1), clses.view(-1, 1), boxes), 1
+        ).to(self.device)
+        targets = self._preprocess_targets(targets, batch_size, scale_tensor)
+        gt_labels, gt_bboxes = targets.split((1, 4), 2)
+        mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
+        return gt_labels, gt_bboxes, mask_gt, True, valid_mask
+
+    # ------------------------------------------------------------------
+    # B4-b：伪融合根因修复 —— mask 条件下 fuse 头改用 IR 标签
+    # ------------------------------------------------------------------
+    def _resolve_fuse_label_keys(
+        self,
+        batch: Dict[str, torch.Tensor],
+        box_key: str,
+        cls_key: str,
+        batch_size: int,
+    ) -> Tuple[str, str]:
+        """为 ``fuse`` 分支按「逐样本是否被 RGB 屏蔽」合并 RGB / IR 两套标签。
+
+        未被屏蔽的样本沿用 RGB 标签（保持主坐标系能力）；被屏蔽样本（RGB 半边已
+        置零，融合分支只能读 IR）改用 IR 标签，把"必须从 IR 解码目标"变成显式监督。
+
+        实现：在 ``batch`` 上写入两个临时键 ``__fuse_boxes__`` / ``__fuse_cls__`` /
+        ``__fuse_bi__``（合并后的框/类/帧索引），并返回这三个键名供
+        :meth:`_prepare_targets` 读取。掩码不可用或全 False 时直接返回原始键（零开销、
+        与改造前逐位一致）。
+
+        Returns:
+            tuple[str, str]: ``(box_key, cls_key)``，指向合并后的临时标签。
+        """
+        # 判别实验：无条件切到 IR 坐标系标签（不依赖屏蔽状态）。
+        if self.fuse_ir_label_always:
+            if all(k in batch for k in ("bboxes_ir", "cls_ir", "batch_idx_ir")):
+                self.last_fuse_label_switched = batch_size
+                return "bboxes_ir", "cls_ir"
+            return box_key, cls_key
+
+        drop = getattr(self.head, "_mm_fusion_drop_per_sample", None)
+        if drop is None or not torch.is_tensor(drop):
+            return box_key, cls_key
+        drop = drop.to(device="cpu", dtype=torch.bool).view(-1)
+        if drop.numel() != batch_size or not bool(drop.any()):
+            return box_key, cls_key
+
+        # 合并：未屏蔽 -> RGB；屏蔽 -> IR
+        for bk, ck, ik in (("bboxes", "cls", "batch_idx"), ("bboxes_ir", "cls_ir", "batch_idx_ir")):
+            if bk not in batch or ck not in batch or ik not in batch:
+                return box_key, cls_key  # 缺 IR 标签则放弃切换，保持原始行为
+
+        b_rgb, b_ir = batch["bboxes"], batch["bboxes_ir"]
+        c_rgb, c_ir = batch["cls"], batch["cls_ir"]
+        i_rgb, i_ir = batch["batch_idx"], batch["batch_idx_ir"]
+
+        # 逐帧筛选：keep_mask 为 True 的帧取 RGB 目标，False 的帧取 IR 目标
+        keep = ~drop  # True = 未屏蔽 = 用 RGB
+        sel_rgb = keep[i_rgb.view(-1).long()]
+        sel_ir = (~keep)[i_ir.view(-1).long()]
+        merged_boxes = torch.cat((b_rgb[sel_rgb], b_ir[sel_ir]), 0)
+        merged_cls = torch.cat((c_rgb[sel_rgb], c_ir[sel_ir]), 0)
+        merged_idx = torch.cat((i_rgb.view(-1)[sel_rgb], i_ir.view(-1)[sel_ir]), 0)
+
+        batch["__fuse_boxes__"] = merged_boxes
+        batch["__fuse_cls__"] = merged_cls
+        batch["__fuse_batch_idx__"] = merged_idx
+        self.last_fuse_label_switched = int(drop.sum().item())
+        return "__fuse_boxes__", "__fuse_cls__"
+
+    @staticmethod
+    def _preprocess_targets(targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
+        """与 ``v8DetectionLoss.preprocess`` 等价的独立实现（避免依赖父类实例状态）。"""
+        nl, ne = targets.shape
+        if nl == 0:
+            return torch.zeros(batch_size, 0, ne - 1, device=targets.device)
+        i = targets[:, 0]
+        _, counts = i.unique(return_counts=True)
+        counts = counts.to(dtype=torch.int32)
+        out = torch.zeros(batch_size, counts.max(), ne - 1, device=targets.device)
+        for j in range(batch_size):
+            matches = i == j
+            if n := int(matches.sum()):
+                out[j, :n] = targets[matches, 1:]
+        out[..., 1:5] = xywh2xyxy(out[..., 1:5].mul_(scale_tensor))
+        return out
+
+    # ------------------------------------------------------------------
+    def forward(
+        self,
+        preds: Dict[str, Any],
+        batch: Dict[str, torch.Tensor],
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """计算三路检测损失之和。
+
+        Args:
+            preds (dict): 聚合头输出 ``{"rgb": feats, "ir": feats, "fuse": feats}``。
+            batch (dict): 训练 batch，需含 ``bboxes``/``cls`` 以及（IR 头所需的）
+                ``bboxes_ir``/``cls_ir``。
+
+        Returns:
+            (Tensor, Tensor): ``(loss * batch_size, loss_items)``。``loss_items`` 为
+            长度 ``3 * n_branches`` 的向量，顺序为
+            ``[box_rgb, cls_rgb, dfl_rgb, box_ir, cls_ir, dfl_ir, box_fuse, ...]``。
+        """
+        if not isinstance(preds, dict):
+            raise TypeError(
+                f"DualHeadDetectionLoss 期望 preds 为按模态分组的 dict，实得 {type(preds).__name__}"
+            )
+
+        # 以任一分支推断 batch_size 与输入像素尺寸
+        any_feats = _one2many_of(next(iter(preds.values())))
+        batch_size = any_feats[0].shape[0]
+        # imgsz 为 (H, W) 像素尺寸（与 v8DetectionLoss 的 imgsz 语义一致）
+        imgsz_hw = torch.tensor(any_feats[0].shape[2:], device=self.device, dtype=torch.float32) * self.stride[0]
+        # 归一化 (x, y, w, h) 转像素 (x1, y1, x2, y2) 时，x 方向用 W、y 方向用 H，
+        # 故 scale 顺序为 [W, H, W, H]；而 imgsz_hw 为 (H, W)，需交换为 (W, H) 再展开。
+        scale_tensor = imgsz_hw[[1, 0, 1, 0]]
+
+        total = torch.zeros(3, device=self.device, dtype=torch.float32)
+        items: List[torch.Tensor] = []
+        # 记录各分支**未加权**的原始 loss（不含 branch_weights）。
+        # 动机：items 里存的是 `branch_items * w`，当 w_fuse≠1（如 S8a 的 2.0）时，
+        # results.csv 的 `train/*_loss_fuse` 会被整体放大 w 倍，与其它分支不可直接比较，
+        # 曾导致「S8a fuse loss 异常」的误判。这里额外暴露原始值供诊断/日志使用。
+        self.last_raw_branch_loss = {}
+
+        for name in self.branch_names:
+            feats = _one2many_of(preds[name])
+            box_key, cls_key = BRANCH_LABEL_KEYS.get(name, ("bboxes", "cls"))
+            valid_key = "valid_ir" if name in {"ir", "fuse_ir"} else "valid_rgb"
+
+            # ---- B4-b：伪融合根因修复 —— mask 条件下 fuse 头改用 IR 标签监督 ----
+            # 依据：因果探针证明 fuse 头从未学会从 IR 半边解码（ir_only 掩码下 fuse≈0.006）。
+            # 根因是「fuse 头恒定用 RGB 坐标系标签监督」，优化目标里没有"必须用 IR"的压力，
+            # 于是它选了最省力的解：完全依赖 RGB 半边（伪融合）。
+            #
+            # 修复：训练时被屏蔽（RGB 半边置零）的样本，其融合分支唯一可用信息源是 IR，
+            # 此时若仍用 RGB 标签监督，等于要求"无米之炊"，只会把 fuse 头压成常量背景；
+            # 改用 **IR 标签** 监督，才能把这些样本变成"必须从 IR 解码目标"的显式优化目标。
+            # 未屏蔽样本仍用 RGB 标签，保证主坐标系能力不退化。
+            #
+            # 逐样本切换通过 merge 两套标签实现：被屏蔽样本用 IR 框/类，其余用 RGB 框/类。
+            if name == "fuse" and self.fuse_ir_label_on_mask:
+                box_key, cls_key = self._resolve_fuse_label_keys(batch, box_key, cls_key, batch_size)
+
+            gt_labels, gt_bboxes, mask_gt, has_target, valid_mask = self._prepare_targets(
+                batch, batch_size, scale_tensor, box_key, cls_key, valid_key
+            )
+
+            crit = self.branch_criteria[name]
+            with _fp32_context(self.device):
+                loss_o2m, items_o2m = crit(
+                    feats, gt_labels, gt_bboxes, mask_gt, batch_size, imgsz_hw, valid_mask
+                )
+                if self.end2end:
+                    feats_o2o = _one2one_of(preds[name])
+                    if feats_o2o is None:
+                        raise TypeError(
+                            f"分支 '{name}' 标注为 end2end，但其输出缺少 'one2one' 分支"
+                        )
+                    loss_o2o, items_o2o = self.branch_criteria_o2o[name](
+                        feats_o2o, gt_labels, gt_bboxes, mask_gt, batch_size, imgsz_hw, valid_mask
+                    )
+                    branch_loss = self.o2m * loss_o2m + self.o2o * loss_o2o
+                    branch_items = self.o2m * items_o2m + self.o2o * items_o2o
+                else:
+                    branch_loss, branch_items = loss_o2m, items_o2m
+            w = self.branch_weights.get(name, 1.0)
+            self.last_raw_branch_loss[name] = branch_items.detach().tolist()
+            total = total + branch_loss * w
+            items.append(branch_items * w)
+
+            if not has_target:
+                LOGGER.debug(
+                    f"DualHeadDetectionLoss: 分支 '{name}' 缺少标签键 ({box_key}/{cls_key})，"
+                    f"该分支仅做背景监督"
+                )
+
+        loss_items = torch.cat(items)
+        return total, loss_items.detach()
+
+
+class DualHeadFusionCriterion(DualHeadDetectionLoss):
+    """在 :class:`DualHeadDetectionLoss` 之上叠加 DFSC 语义一致性损失。
+
+    Args:
+        model: 已 de-parallel 的检测模型。
+        branch_weights (dict, optional): 各分支检测损失权重。
+        dfs_weight (float): DFSC 损失总权重；0 表示关闭。
+        dfs_mode (str): DFSC 采样模式，``"cls"`` 或 ``"feat"``。
+        dfs_temperature (float): DFSC 温度系数。
+        consist_weight (float): 三个头之间的分类响应一致性权重；0 表示关闭。
+        tal_topk (int): TaskAlignedAssigner 的 topk。
+
+    Attributes:
+        last_dfs (float): 最近一次前向的 DFSC 损失值（供日志记录）。
+        last_consist (float): 最近一次前向的跨头一致性损失值。
+        last_consist_fuse_ir (float): 最近一次前向的「fuse vs fuse_ir」双坐标系
+            一致性损失值（B1-2）。
+    """
+
+    def __init__(
+        self,
+        model: nn.Module,
+        branch_weights: Optional[Dict[str, float]] = None,
+        dfs_weight: float = 0.0,
+        dfs_mode: str = "cls",
+        dfs_temperature: float = 1.0,
+        consist_weight: float = 0.0,
+        tal_topk: int = 10,
+        tal_metric: str = "iou",
+        fuse_ir_consist_weight: float = 0.0,
+        fuse_ir_distill_weight: float = 0.0,
+        gate_reg_weight: float = 0.0,
+        gate_reg_target: float = 0.15,
+        alpha_anchor_weight: float = 0.0,
+        alpha_min: float = 0.2,
+        fuse_ir_label_always: bool = False,
+        end2end: bool = False,
+        prog_loss: bool = True,
+        tal_topk2: Optional[int] = None,
+        tal_stride: Optional[List[int]] = None,
+    ) -> None:
+        super().__init__(
+            model,
+            branch_weights=branch_weights,
+            tal_topk=tal_topk,
+            tal_metric=tal_metric,
+            end2end=end2end,
+            prog_loss=prog_loss,
+            tal_topk2=tal_topk2,
+            tal_stride=tal_stride,
+        )
+        # 门控节点在主干融合颈（layer 46/49/52），父类只保留检测头引用，
+        # 因此这里显式保存整个模型供 _alpha_anchor_reg 反查。
+        # 必须用 object.__setattr__ 绕过 nn.Module 的属性注册：criterion 自身会被
+        # 挂到 model.criterion 上，若再把 model 注册成子模块就会形成
+        # model->criterion->model 的环，EMA 的 state_dict() 会无限递归
+        # （实测 RecursionError: maximum recursion depth exceeded）。
+        object.__setattr__(self, "_gate_root", model)
+        self.dfs_weight = float(dfs_weight)
+        self.consist_weight = float(consist_weight)
+        # B1-2：fuse 与 fuse_ir 是一组融合特征的两种坐标系解码结果，二者语义
+        # 必须一致（同一个目标不能在一个坐标系里是"人"、另一个里是"车"）。
+        # 该约束默认关闭；仅当模型挂载了 fuse_ir 头时才有意义。
+        self.fuse_ir_consist_weight = float(fuse_ir_consist_weight or 0.0)
+        # B3：drop-RGB 条件下的「fuse←ir 蒸馏」。当融合颈的 RGB 半边被屏蔽时，
+        # 融合分支失去 RGB 图像信息来源，此时强制其分类 logits 向 ir 分支对齐，
+        # 等于把「用 IR 也能检测」变成显式优化目标（伪融合根因是监督缺失，见
+        # diag_ir_decodability.py：IR 半边 AUC=0.97 证明信息在，只是没被逼着用）。
+        # 默认 0（关闭），不影响任何既有实验。
+        self.fuse_ir_distill_weight = float(fuse_ir_distill_weight or 0.0)
+        # P0：门控激活正则。惩罚 GatedReliabilityFusion 的门控标准差低于目标值，
+        # 阻止门控塌缩到中性 0.5（diag_gate_stats 实测 L48/L50 std≈0，冻结）。
+        # 默认 0（关闭）；仅在 --config dual-fusion-gated 下有意义。
+        self.gate_reg_weight = float(gate_reg_weight or 0.0)
+        self.gate_reg_target = float(gate_reg_target or 0.15)
+        # model.args 是模型 YAML 的字典，不含 mm_* 超参，因此这里以环境变量为准
+        # （train_full 在构建模型前无法把 trainer 的 hyp 注入 criterioin 的构造参数）。
+        self.alpha_anchor_weight = float(
+            os.environ.get("MM_ALPHA_ANCHOR_WEIGHT", alpha_anchor_weight or 0.0)
+        )
+        self.alpha_min = float(
+            os.environ.get("MM_ALPHA_MIN", alpha_min if alpha_min is not None else 0.2)
+        )
+        self.last_alpha_anchor = 0.0
+        # 判别实验：fuse 头无条件改用 IR 坐标系标签（覆盖父类的 mask 条件切换）。
+        self.fuse_ir_label_always = bool(fuse_ir_label_always)
+        self.dfs = DFSCLoss(mode=dfs_mode, temperature=dfs_temperature)
+        self.last_dfs = 0.0
+        self.last_consist = 0.0
+        self.last_consist_fuse_ir = 0.0
+        self.last_distill_fuse_ir = 0.0
+        self.last_gate_reg = 0.0
+        LOGGER.info(
+            f"DualHeadFusionCriterion: dfs_weight={self.dfs_weight}, mode={dfs_mode}, "
+            f"consist_weight={self.consist_weight}, "
+            f"fuse_ir_consist_weight={self.fuse_ir_consist_weight}, "
+            f"fuse_ir_distill_weight={self.fuse_ir_distill_weight}, "
+            f"gate_reg_weight={self.gate_reg_weight}, gate_reg_target={self.gate_reg_target}, "
+            f"fuse_ir_label_always={self.fuse_ir_label_always}"
+        )
+
+    # ------------------------------------------------------------------
+    def forward(
+        self,
+        preds: Dict[str, Any],
+        batch: Dict[str, torch.Tensor],
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """三路检测损失 + DFSC + 跨头一致性。"""
+        det_loss, det_items = super().forward(preds, batch)
+
+        # 以任一分支推断 batch_size（保持与检测损失一致）
+        any_feats = _one2many_of(next(iter(preds.values())))
+        batch_size = any_feats[0].shape[0]
+
+        extra = det_loss.new_zeros(())
+
+        # ---- DFSC：目标级跨模态语义一致性 ----
+        if (
+            self.dfs_weight > 0
+            and "bboxes" in batch and "bboxes_ir" in batch
+            and batch["bboxes"].numel() > 0 and batch["bboxes_ir"].numel() > 0
+        ):
+            rgb_feats = _one2many_of(preds["rgb"])
+            ir_feats = _one2many_of(preds["ir"])
+            try:
+                dfs_val = self.dfs(
+                    rgb_feats[0], ir_feats[0],
+                    batch["bboxes"], batch["bboxes_ir"],
+                    batch_idx_rgb=batch.get("batch_idx", None),
+                    batch_idx_ir=batch.get("batch_idx_ir", None),
+                    valid_rgb=batch.get("valid_rgb", None),
+                    valid_ir=batch.get("valid_ir", None),
+                )
+                self.last_dfs = float(dfs_val.detach())
+                extra = extra + dfs_val * self.dfs_weight * batch_size
+            except Exception as e:  # pragma: no cover - 防御
+                LOGGER.warning(f"DFSC 计算失败，本次跳过: {type(e).__name__}: {e}")
+                self.last_dfs = 0.0
+        else:
+            self.last_dfs = 0.0
+
+        # ---- 跨头分类响应一致性（可选）----
+        if self.consist_weight > 0:
+            try:
+                consist_val = self._head_consistency(preds)
+                self.last_consist = float(consist_val.detach())
+                extra = extra + consist_val * self.consist_weight * batch_size
+            except Exception as e:  # pragma: no cover - 防御
+                LOGGER.warning(f"跨头一致性计算失败，本次跳过: {type(e).__name__}: {e}")
+                self.last_consist = 0.0
+        else:
+            self.last_consist = 0.0
+
+        # ---- B1-2：fuse 与 fuse_ir 的双坐标系语义一致性（可选）----
+        # 两头读的是**同一组**融合特征（47/49/51），只是解码到不同坐标系。
+        # 因此它们的分类响应本应一致；此项用于抑制「同一特征给出矛盾语义」。
+        if self.fuse_ir_consist_weight > 0 and "fuse_ir" in preds:
+            try:
+                pair_val = self._pair_consistency(preds, "fuse", "fuse_ir")
+                self.last_consist_fuse_ir = float(pair_val.detach())
+                extra = extra + pair_val * self.fuse_ir_consist_weight * batch_size
+            except Exception as e:  # pragma: no cover - 防御
+                LOGGER.warning(f"双坐标系一致性计算失败，本次跳过: {type(e).__name__}: {e}")
+                self.last_consist_fuse_ir = 0.0
+        else:
+            self.last_consist_fuse_ir = 0.0
+
+        # ---- B3：drop-RGB 条件下的 fuse←ir 蒸馏（可选）----
+        # 仅在「融合颈 RGB 半边」确实被屏蔽的 batch 上生效：此时融合分支失去 RGB
+        # 图像信息，唯一可用来源是 IR；把 fuse 的分类 logits 拉向 ir 分支，即可把
+        # 「用 IR 也能检测」变成显式优化目标。未屏蔽时不做（RGB 足够，会退化为无压力）。
+        if (
+            self.fuse_ir_distill_weight > 0
+            and "fuse" in preds and "ir" in preds
+            and getattr(self.head, "_mm_fusion_drop_active", False)
+        ):
+            try:
+                distill_val = self._fuse_from_ir_distill(preds, "fuse", "ir")
+                self.last_distill_fuse_ir = float(distill_val.detach())
+                extra = extra + distill_val * self.fuse_ir_distill_weight * batch_size
+            except Exception as e:  # pragma: no cover - 防御
+                LOGGER.warning(f"fuse←ir 蒸馏计算失败，本次跳过: {type(e).__name__}: {e}")
+                self.last_distill_fuse_ir = 0.0
+        else:
+            self.last_distill_fuse_ir = 0.0
+
+        # ---- P0：门控激活正则 L_gate ----
+        # 依据：diag_gate_stats 显示 GatedReliabilityFusion 在 L48/L50 的门控
+        # std≈0（g 冻结在中性 0.5），显式门控退化成 (rgb+ir)/2 的平均。此处惩罚
+        # 「门控标准差低于目标值」，用 ReLU 单边约束：达标即归零，不会无界推大。
+        if self.gate_reg_weight > 0:
+            try:
+                gate_reg = self._gate_activation_reg()
+                self.last_gate_reg = float(gate_reg.detach())
+                extra = extra + gate_reg * self.gate_reg_weight * batch_size
+            except Exception as e:  # pragma: no cover - 防御
+                LOGGER.warning(f"L_gate 计算失败，本次跳过: {type(e).__name__}: {e}")
+                self.last_gate_reg = 0.0
+        else:
+            self.last_gate_reg = 0.0
+
+        # ---- G1：错位感知门控的锚定正则 L_alpha ----
+        # 目标 alpha* 由注入位移标定（0/2/4/8 px -> 1.0/0.8/0.6/0.4），
+        # 只用到训练期增广参数，不需要任何标注。
+        if self.alpha_anchor_weight > 0:
+            try:
+                alpha_reg = self._alpha_anchor_reg(batch)
+                self.last_alpha_anchor = float(alpha_reg.detach())
+                extra = extra + alpha_reg * self.alpha_anchor_weight * batch_size
+            except Exception as e:  # pragma: no cover
+                LOGGER.warning(f"L_alpha 计算失败，本次跳过: {type(e).__name__}: {e}")
+                self.last_alpha_anchor = 0.0
+        else:
+            self.last_alpha_anchor = 0.0
+
+        return det_loss + extra, det_items
+
+    def _gate_activation_reg(self) -> torch.Tensor:
+        """门控激活正则：惩罚门控融合层的门控标准差低于目标值。
+
+        适用层：``GatedReliabilityFusion``（改动 A）与 ``DeformableCrossModalFusion``
+        （改动 C4）——两者都在 forward 中保留非 detach 的 ``_gate_raw`` 引用。
+
+        使用**非 detach** 的 ``_gate_raw``（forward 中保留的 gate 张量引用）计算
+        std，梯度可经其回传到 gate 分支；`detach()`` 版本（``last_gate_std``）
+        仅用于诊断，不能用于损失，否则该项退化为常数。
+
+        Returns:
+            (Tensor): 标量惩罚 ``mean_l relu(target - std(g_l))^2``；
+            模型无门控层时返回 0（保持计算图可反传）。
+        """
+        from ultralytics.nn.mm.gated_fusion import GatedReliabilityFusion
+        from ultralytics.nn.mm.deform_fusion import DeformableCrossModalFusion
+
+        gate_types = (GatedReliabilityFusion, DeformableCrossModalFusion)
+        stds = []
+        for m in self.head.modules():
+            if isinstance(m, gate_types):
+                g = getattr(m, "_gate_raw", None)
+                if g is not None:
+                    stds.append(g.float().std())
+        if not stds:
+            return torch.zeros((), device=self.device)
+        target = self.gate_reg_target
+        return torch.stack([torch.relu(target - s) ** 2 for s in stds]).mean()
+
+    def _alpha_anchor_reg(self, batch) -> torch.Tensor:
+        """MSE between the predicted gate alpha and the shift-calibrated target.
+
+        The target curve ``0/2/4/8 px -> 1.0/0.8/0.6/0.4`` comes from the offline
+        alpha sweep (whole-level oracle alpha).  ``batch['mm_ir_shift']`` is the
+        magnitude of the IR perturbation actually applied by the augmentation,
+        so no annotation is involved.
+        """
+        from ultralytics.nn.mm.misalign_gate import MisalignGatedConcat
+
+        # 门控节点位于**主干融合颈**（如 layer 46/49/52），不在检测头内部，
+        # 因此必须扫描整个模型；只扫 self.head 会静默返回 0。
+        root = getattr(self, "_gate_root", None)
+        if root is None or not hasattr(root, "modules"):
+            root = self.head
+        alphas = []
+        for m in root.modules():
+            if isinstance(m, MisalignGatedConcat):
+                a = getattr(m, "_alpha_raw", None)
+                if a is not None:
+                    alphas.append(a)
+        if not getattr(self, "_alpha_dbg_done", False):
+            self._alpha_dbg_done = True
+            try:
+                _keys = [k for k in batch.keys()] if isinstance(batch, dict) else "not-a-dict"
+                print(
+                    "[L_alpha] weight=%s gates=%d has_shift=%s batch_keys=%s"
+                    % (self.alpha_anchor_weight, len(alphas),
+                       ("mm_ir_shift" in batch) if isinstance(batch, dict) else False,
+                       _keys),
+                    flush=True,
+                )
+            except Exception as _e:
+                print(f"[L_alpha] diag failed: {_e}", flush=True)
+        if not alphas:
+            return torch.zeros((), device=self.device)
+        shift = batch.get("mm_ir_shift", None) if isinstance(batch, dict) else None
+        if shift is None:
+            return torch.zeros((), device=self.device)
+        if not getattr(self, "_alpha_dbg_done", False):
+            self._alpha_dbg_done = True
+            try:
+                print(
+                    "[L_alpha] gate_layers=%d shift=%s alpha_mean=%.4f"
+                    % (len(alphas), [round(float(x), 2) for x in shift.flatten()[:8]],
+                       float(alphas[0].mean())),
+                    flush=True,
+                )
+            except Exception as _e:
+                print(f"[L_alpha] diag failed: {_e}", flush=True)
+        dev = alphas[0].device
+        s = shift.to(device=dev, dtype=torch.float32).view(-1, 1).clamp(0.0, 8.0)
+        if s.shape[0] == 1 and alphas[0].shape[0] > 1:
+            s = s.expand(alphas[0].shape[0], 1)
+        pts = torch.tensor([0.0, 2.0, 4.0, 8.0], device=dev)
+        vals = torch.tensor([1.0, 0.8, 0.6, 0.4], device=dev)
+        idx = torch.searchsorted(pts, s, right=True).clamp(1, 3)
+        x0, x1 = pts[idx - 1], pts[idx]
+        y0, y1 = vals[idx - 1], vals[idx]
+        target = (y0 + (y1 - y0) * (s - x0) / (x1 - x0)).clamp(self.alpha_min, 1.0)
+        return torch.stack([((a - target) ** 2).mean() for a in alphas]).mean()
+
+    def _pair_consistency(self, preds: Dict[str, Any], name_a: str, name_b: str) -> torch.Tensor:
+        """约束两个指定头的分类响应在空间上相互一致。
+
+        与 :meth:`_head_consistency` 同为「全图分布」层面的约束（对比 DFSC 的
+        目标级采样），但只作用于一对头。B1 用它约束 fuse / fuse_ir —— 两者共享
+        同一组融合特征，语义不一致即说明融合特征在两个坐标系间自相矛盾。
+
+        与 :meth:`_head_consistency` 一致地在 **logits** 上计算，理由见该方法的
+        文档字符串（sigmoid 后处于饱和区，梯度接近于零）。
+        """
+        logits = []
+        for name in (name_a, name_b):
+            feats = _one2many_of(preds[name])
+            no = feats[0].shape[1]
+            cls_logit = feats[0][:, no - self.nc:, :, :].float()
+            logits.append(F.adaptive_avg_pool2d(cls_logit, (8, 8)))
+        return F.mse_loss(logits[0], logits[1])
+
+    def _fuse_from_ir_distill(self, preds: Dict[str, Any], student: str, teacher: str) -> torch.Tensor:
+        """把 ``student``（fuse）头的分类 logits 蒸馏向 ``teacher``（ir）头。
+
+        用于 B3：在 drop-RGB 条件下逼融合分支学 IR 的可检测性。只对齐**分类响应**
+        的空间分布（不做框回归蒸馏），因为 fuse / ir 的框分处不同坐标系，直接对齐
+        坐标会引入错误监督；而"哪里有目标"的分类响应是跨坐标系一致的。
+
+        teacher 侧 detach，避免把 ir 头也拉偏；在 logits 上计算（理由同
+        :meth:`_head_consistency`：sigmoid 后饱和、梯度过小）。
+        """
+        def _cls_logit(name: str) -> torch.Tensor:
+            feats = _one2many_of(preds[name])
+            no = feats[0].shape[1]
+            return feats[0][:, no - self.nc:, :, :].float()
+
+        s = F.adaptive_avg_pool2d(_cls_logit(student), (8, 8))
+        t = F.adaptive_avg_pool2d(_cls_logit(teacher), (8, 8)).detach()
+        return F.mse_loss(s, t)
+
+    def _head_consistency(self, preds: Dict[str, Any]) -> torch.Tensor:
+        """约束 rgb / ir / fuse 三个头的分类响应在空间上相互一致。
+
+        注意：这里比较的是**分类分支**通道（``reg_max*4`` 之后的部分），
+        与 DFSC 的"目标级采样"互补——DFSC 只看目标处，本项看全图分布。
+
+        为什么在 **logits** 而非 sigmoid 后的概率上计算
+        ------------------------------------------------
+        Detect 头为数值稳定会把 ``cv3`` 偏置初始化为负值（约 -4.6），使初始
+        sigmoid 输出落在 ~1e-3 量级。此时三个头概率图的 MSE 只有 ~1e-8，
+        梯度接近于零，该正则项等于"挂着但不起作用"（实测验证）。
+        直接比较 logits 可避开这一饱和区，量级正常、梯度有效。
+        """
+        logits = []
+        for name in ("rgb", "ir", "fuse"):
+            feats = _one2many_of(preds[name])
+            no = feats[0].shape[1]
+            # 取首个尺度，切出分类通道 logits（未过 sigmoid）
+            cls_logit = feats[0][:, no - self.nc:, :, :].float()
+            logits.append(F.adaptive_avg_pool2d(cls_logit, (8, 8)))
+
+        loss = logits[0].new_zeros(())
+        ref = logits[0]
+        for other in logits[1:]:
+            loss = loss + F.mse_loss(ref, other)
+        return loss / 2.0
+
+
+# ======================================================================
+# 工具
+# ======================================================================
+def _resolve_cls_loss_fn(loss_type: str, bce: nn.Module) -> nn.Module:
+    """构造分类损失函数（与 v8DetectionLoss._init_cls_loss_fn 保持一致的默认参数）。"""
+    from ultralytics.utils.loss import EFClass, FocalLoss, QualityFocalLoss, VarifocalLoss
+
+    if loss_type == "bce":
+        return bce
+    if loss_type == "focal":
+        return FocalLoss(gamma=1.5, alpha=0.25)
+    if loss_type == "varifocal":
+        return VarifocalLoss(gamma=2.0, alpha=0.75)
+    if loss_type == "efl":
+        return EFClass(gamma=2.0, alpha=0.25)
+    if loss_type == "qfl":
+        return QualityFocalLoss(beta=2.0)
+    raise ValueError(f"Unsupported loss_cls type: {loss_type}")
+
+
+class _nullcontext:
+    """无操作的上下文管理器（CPU 路径下替代 torch.amp.autocast）。"""
+
+    def __enter__(self):
+        return None
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _fp32_context(device: torch.device):
+    """在 CUDA 上禁用 autocast 以保证损失数值稳定；CPU 上为空操作。
+
+    与 ``v8DetectionLoss.__call__`` 中 ``with autocast(enabled=False)`` 的意图一致：
+    前向可在 AMP 下进行，但损失计算强制 FP32。
+    """
+    if device.type == "cuda":
+        return torch.amp.autocast("cuda", enabled=False)
+    return _nullcontext()

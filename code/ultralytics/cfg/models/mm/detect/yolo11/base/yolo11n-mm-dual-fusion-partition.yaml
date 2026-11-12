@@ -1,0 +1,99 @@
+# Channel-partitioned cross-modal fusion (改动 D3: 通道级硬性模态分工).
+#
+# 根因（消融诊断 diag_channel_ablation.py 的实测）：
+#   * fuse 头对 IR 半边 **完全零响应** —— IR 支路(L39) 64 通道全部置零，
+#     fuse mAP50-95 仅从 0.6914 变到 0.6858（Δ=-0.006，噪声量级）；
+#     同期 ir 头自身从 0.6458 正常塌到 0.0000，证明置零确实生效。
+#   * fuse 头读 RGB 是**全通道渐进式**：置零 5/10/20% 几乎无影响，
+#     30% 崩到 0.42，100% 塌到 0.0024。
+#   * 梯度归因（diag_fusion_grad_attribution.py）：fuse 损失梯度 75.6% 压 RGB 支路。
+#   三条证据共同说明：`fused = rgb + gate*(ir - rgb)` 这一族算子存在结构性漏洞 ——
+#   gate 可整体趋 0，前向旁路 IR、反向不给 IR 梯度。A4/S3/D2-P1b 三次训练期
+#   干预全部失败，正是因为它们约束的是 gate 取值，而 gate 本就有权关闭。
+#
+# 本配置的解法：把输出通道**硬性切分**为 [RGB 专属 | IR 专属 | 交互] 三段，
+#   其中 IR 专属段没有任何 gate，IR 特征直接进入输出，结构上无法被关闭；
+#   融合头的 3x3 卷积跨全部通道抽取，故 IR 信号必然进入其感受野。
+#
+# 与 deform 版（C4）的唯一差异：三个融合节点由 DeformableCrossModalFusion
+# 换成 ChannelPartitionFusion。其余骨干/neck/四个检测头完全一致，
+# 保证只改「融合算子」一个变量，可与 C4 / gated / reliable / N0 直接对照。
+#
+# ChannelPartitionFusion 参数：[ouc, max_offset, base, split, num_points, attn]
+#   split: 三段通道占比 [RGB, IR, 交互]，和为 1；默认 [0.5, 0.25, 0.25]
+#   num_points(K): IR 可变形采样点数，默认 4
+#   base: 交互段残差基 'rgb'（默认）| 'mean'
+#
+# 安全初始化：offset 头零初始化（起点恒等对齐），attn/gate 末层小随机初始化
+# （避免 std 正则的零梯度鞍点，同 P0/L_gate 的教训）。RGB/IR 专属段无 gate。
+
+nc: 80
+scales:
+  n: [0.50, 0.25, 1024]
+  s: [0.50, 0.50, 1024]
+  m: [0.50, 1.00, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.50, 512]
+
+backbone:
+  - [-1, 1, Conv, [64, 3, 2], 'RGB']
+  - [-1, 1, Conv, [128, 3, 2]]
+  - [-1, 2, C3k2, [256, False, 0.25]]
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [-1, 2, C3k2, [512, False, 0.25]]
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [-1, 2, C3k2, [512, True]]
+  - [-1, 1, Conv, [1024, 3, 2]]
+  - [-1, 2, C3k2, [1024, True]]
+  - [-1, 1, SPPF, [1024, 5]]
+  - [-1, 2, C2PSA, [1024]]
+  - [-1, 1, Conv, [64, 3, 2], 'X']
+  - [-1, 1, Conv, [128, 3, 2]]
+  - [-1, 2, C3k2, [256, False, 0.25]]
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [-1, 2, C3k2, [512, False, 0.25]]
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [-1, 2, C3k2, [512, True]]
+  - [-1, 1, Conv, [1024, 3, 2]]
+  - [-1, 2, C3k2, [1024, True]]
+  - [-1, 1, SPPF, [1024, 5]]
+  - [-1, 2, C2PSA, [1024]]
+
+head:
+  - [10, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 6], 1, Concat, [1]]
+  - [-1, 2, C3k2, [512, False]]
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 4], 1, Concat, [1]]
+  - [-1, 2, C3k2, [256, False]]
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [[-1, 24], 1, Concat, [1]]
+  - [-1, 2, C3k2, [512, False]]
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [[-1, 10], 1, Concat, [1]]
+  - [-1, 2, C3k2, [1024, True]]
+  - [21, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 17], 1, Concat, [1]]
+  - [-1, 2, C3k2, [512, False]]
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 15], 1, Concat, [1]]
+  - [-1, 2, C3k2, [256, False]]
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [[-1, 36], 1, Concat, [1]]
+  - [-1, 2, C3k2, [512, False]]
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [[-1, 21], 1, Concat, [1]]
+  - [-1, 2, C3k2, [1024, True]]
+  # 三个融合节点：唯一的架构改动（相对 deform 版仅为融合算子替换）
+  # 参数 [ouc, max_offset, base, split, num_points, attn]
+  - [[27, 39], 1, ChannelPartitionFusion, [256, 0.08, 'rgb', [0.5, 0.25, 0.25], 4, 'channel']]
+  - [-1, 2, C3k2, [256, False]]
+  - [[30, 42], 1, ChannelPartitionFusion, [512, 0.08, 'rgb', [0.5, 0.25, 0.25], 4, 'channel']]
+  - [-1, 2, C3k2, [512, False]]
+  - [[33, 45], 1, ChannelPartitionFusion, [1024, 0.08, 'rgb', [0.5, 0.25, 0.25], 4, 'channel']]
+  - [-1, 2, C3k2, [1024, True]]
+  - [[27, 30, 33], 1, Detect, [nc]]
+  - [[39, 42, 45], 1, Detect, [nc]]
+  - [[47, 49, 51], 1, Detect, [nc]]
+  - [[47, 49, 51], 1, Detect, [nc]]
+  - [[52, 53, 54, 55], 1, DualHeadFusionDetect, []]

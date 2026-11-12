@@ -1,0 +1,52 @@
+# Ultralytics YOLO26MM MultiModal Early Fusion Configuration
+# YOLO26MM RGB+X 二元模态早期融合 + v26Detect 头
+# 策略: 输入层直接融合 RGB(3ch)+X(3ch)=Dual(6ch)，集成 YOLO26 端到端检测优化
+# YOLO26 特性: end2end + reg_max=1 + SPPF shortcut
+
+# Parameters
+nc: 80  # number of classes
+end2end: True  # YOLO26特性: end-to-end detection (one2many + one2one dual branches)
+reg_max: 1  # YOLO26特性: simplified DFL bins
+
+scales:  # model compound scaling constants
+  # [depth, width, max_channels]
+  n: [0.50, 0.25, 1024]
+  s: [0.50, 0.50, 1024]
+  m: [0.50, 1.00, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.50, 512]
+
+# 早期融合 - 输入层直接使用6通道融合
+backbone:
+  # P1/2 - 早期融合层: 直接处理6通道输入(RGB+X)
+  - [-1, 1, Conv, [64, 3, 2], 'Dual']      # 0-P1/2 (6ch->64ch early fusion)
+  - [-1, 1, Conv, [128, 3, 2]]             # 1-P2/4
+  - [-1, 2, C3k2, [256, False, 0.25]]      # 2
+  - [-1, 1, Conv, [256, 3, 2]]             # 3-P3/8
+  - [-1, 2, C3k2, [512, False, 0.25]]      # 4
+  - [-1, 1, Conv, [512, 3, 2]]             # 5-P4/16
+  - [-1, 2, C3k2, [512, True]]             # 6
+  - [-1, 1, Conv, [1024, 3, 2]]            # 7-P5/32
+  - [-1, 2, C3k2, [1024, True]]            # 8
+  - [-1, 1, SPPF, [1024, 5, 3, True]]      # 9 (YOLO26: shortcut=True)
+  - [-1, 2, C2PSA, [1024]]                 # 10
+
+# YOLO26 检测头 (Neck + v26Detect head)
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]   # 11
+  - [[-1, 6], 1, Concat, [1]]                    # 12 cat backbone P4
+  - [-1, 2, C3k2, [512, True]]                   # 13
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]   # 14
+  - [[-1, 4], 1, Concat, [1]]                    # 15 cat backbone P3
+  - [-1, 2, C3k2, [256, True]]                   # 16 (P3/8-small)
+
+  - [-1, 1, Conv, [256, 3, 2]]                   # 17
+  - [[-1, 13], 1, Concat, [1]]                   # 18 cat head P4
+  - [-1, 2, C3k2, [512, True]]                   # 19 (P4/16-medium)
+
+  - [-1, 1, Conv, [512, 3, 2]]                   # 20
+  - [[-1, 10], 1, Concat, [1]]                   # 21 cat backbone P5
+  - [-1, 1, C3k2, [1024, True, 0.5]]             # 22 (P5/32-large)
+
+  - [[16, 19, 22], 1, v26Detect, [nc]]           # 23 v26Detect(P3, P4, P5) with end2end + reg_max=1

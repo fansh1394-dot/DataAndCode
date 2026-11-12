@@ -1,0 +1,688 @@
+================================================================================
+          YOLOMM / RTDETRMM  多模态目标检测项目  ——  新手使用指南
+================================================================================
+
+本指南面向第一次接触本项目的朋友，教你从零开始：搭环境 → 备数据 → 跑实验 →
+换模型 → 看指标。所有操作都围绕项目根目录下已经写好的脚本展开，你只需要
+「改两行路径 / 改几个参数 → 用你自己的 Python 环境运行」，不需要自己写代码。
+
+本项目只有两个模型家族：
+  - YOLOMM   基于 YOLO 的图图多模态检测（RGB + X 双模态）
+  - RTDETRMM 基于 RT-DETR 的图图多模态检测（RGB + X 双模态）
+  其中 X 模态可以是：thermal(红外)/ir(红外)/depth(深度)/edge(边缘)/dem(高程) 等任意类型。
+
+阅读建议：第一次请按第 1→2→3 章顺序走通一遍；第 4、5 章作为查阅手册。
+
+文中凡是形如 <你的...> 的内容，都是需要你按自己机器/数据替换的占位符。
+
+
+================================================================================
+第 1 章   环 境 准 备
+================================================================================
+
+--------------------------------------------------------------------------
+1.1  硬件要求
+--------------------------------------------------------------------------
+训练、验证、推理都需要一张 NVIDIA 显卡（建议显存 ≥ 8GB，越大越好）。
+推理和模态生成对显存要求较低；训练 batch 越大越吃显存。
+检查你的显卡：
+    nvidia-smi                  # 查看显卡型号、驱动版本、显存大小
+
+--------------------------------------------------------------------------
+1.2  创建 Python 环境
+--------------------------------------------------------------------------
+建议用 Python 3.10。可以用 conda，也可以用系统自带的 venv，二选一即可。
+
+【方式 A：用 conda】（推荐）
+    conda create -n yolomm python=3.10 -y
+    conda activate yolomm
+（环境名 yolomm 只是建议，你可以自己起名；之后每次用项目前都先 conda activate 它）
+
+【方式 B：用 venv】
+    python3.10 -m venv yolomm-env
+    # Windows:  yolomm-env\Scripts\activate
+    # Linux/Mac: source yolomm-env/bin/activate
+
+--------------------------------------------------------------------------
+1.3  安装依赖
+--------------------------------------------------------------------------
+本项目本身是源码（项目根目录下的 ultralytics 文件夹就是包本身），不需要 pip install
+本项目，只要在「项目根目录」下运行脚本，Python 就能 import 到它。你只需装好下面的
+运行依赖（在你刚激活的环境里执行）：
+
+第一步：安装带 CUDA 的 PyTorch（按官方选择器，匹配你的显卡驱动）：
+    # 示例（Linux + CUDA 12.1），其它版本去 https://pytorch.org 查对应命令
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+第二步：安装其余依赖：
+    pip install numpy opencv-python pillow pyyaml requests matplotlib pandas seaborn tqdm psutil scipy
+
+第三步（按需）：
+    pip install pycocotools        # 跑 COCO 标准评测（第 5 章 valCOCO）时需要
+    pip install onnx onnxruntime   # 导出 ONNX 时需要
+    pip install tensorrt           # 导出 TensorRT engine 时需要（可选）
+
+提示：如果运行脚本时报 ModuleNotFoundError: No module named 'xxx'，按提示
+pip install xxx 即可。
+
+--------------------------------------------------------------------------
+1.4  验证环境是否就绪
+--------------------------------------------------------------------------
+    python -c "import torch; print('torch', torch.__version__, 'cuda可用', torch.cuda.is_available())"
+    # 应输出 True 表示 CUDA 可用；若为 False，说明 PyTorch 没装到 CUDA 版本，重装 1.3 第一步
+
+--------------------------------------------------------------------------
+1.5  如何运行项目脚本
+--------------------------------------------------------------------------
+项目根目录（本文件所在目录）下的 .py 脚本，它们都是「直接可运行的入口」。
+统一运行方式：先激活你的环境 → 在项目根目录下执行，例如：
+
+    conda activate yolomm         # 激活你 1.2 建的环境（venv 用户用对应的 activate）
+    python trainMM.py             # YOLOMM 检测训练
+
+注意：务必在【项目根目录】下运行，这样 Python 才能正确找到本地 ultralytics 包。
+
+这些脚本里的参数大多是【硬编码】的（不是命令行参数），用法是：
+  1) 用编辑器打开脚本（如 trainMM.py）
+  2) 修改里面的 model 配置名、data 路径、epochs、batch、device 等
+  3) 保存后 python trainMM.py 运行
+所有脚本默认在「当前工作目录 = 项目根目录」下运行，结果会写到 project/name 指定的目录。
+
+--------------------------------------------------------------------------
+1.6  常见环境问题
+--------------------------------------------------------------------------
+  Q: 报错 No module named 'ultralytics'？
+  A: 你没有在项目根目录下运行。cd 到项目根目录再试。
+
+  Q: torch.cuda.is_available() 返回 False？
+  A: 装的是 CPU 版 PyTorch。按 1.3 第一步重装带 CUDA 的版本（注意 --index-url）。
+
+  Q: Windows 下训练卡死 / 数据加载报错？
+  A: 把脚本里的 workers=8 改成 workers=0。
+
+  Q: 显存不够 (CUDA out of memory)？
+  A: 调小 batch（如 batch=4 或 2），或换更小的模型规模（见第 4 章）。
+
+
+================================================================================
+第 2 章   数 据 集 准 备 以 及 模 态 生 成
+================================================================================
+
+多模态训练需要 RGB 图 + X 模态图【按文件名同名配对】+ 共享的 YOLO 标注。
+
+--------------------------------------------------------------------------
+2.1  目录结构约定（务必遵守）
+----------------------------------------------------------------------
+假设你的数据集根目录为 <你的数据集目录>，结构如下：
+
+    <你的数据集目录>/
+    ├── images/                ← 主模态(RGB) 图（目录名可自定义，在 data.yaml 里配）
+    │   ├── train/  000001.jpg  000002.jpg ...
+    │   ├── val/    ...
+    │   └── test/   ...
+    ├── images_ir/             ← X 模态图（目录名在 data.yaml 的 modalities 里配）
+    │   ├── train/  000001.jpg  000002.jpg ...   ← 与 RGB 同名！
+    │   ├── val/    ...
+    │   └── test/   ...
+    ├── images_depth/          ← 另一种 X 模态（可选，按需放置）
+    │   └── ...
+    └── labels/                ← YOLO 格式标注（所有模态共用同一份）
+        ├── train/  000001.txt  000002.txt ...
+        ├── val/    ...
+        └── test/   ...
+
+关键三点：
+  1) 所有模态的图像【文件名（不含扩展名的部分）必须完全一致】，只是所在目录不同。
+  2) 各模态的目录名在 data.yaml 的 modalities 字典里配置（见 2.2），不写时程序会按
+     约定 images_<模态名> 自动推断（例如 ir→images_ir、depth→images_depth）。
+  3) X 模态图可以是普通图片(.jpg/.png)，也可以是数值矩阵(.npy/.npz/.tif)，都能自动加载。
+
+--------------------------------------------------------------------------
+2.2  编写 data.yaml
+----------------------------------------------------------------------
+在数据集目录（或项目根目录）下写一个 data.yaml，告诉程序数据在哪、用哪些模态。
+完整示例（以红外数据集为例，注意把路径换成你自己的）：
+
+    path: <你的数据集绝对目录>            # 数据集根目录（只能绝对路径）
+    train: images/train                  # 训练集主模态(RGB)子目录（相对 path）
+    val:   images/val                    # 验证集主模态子目录
+    test:  images/test                   # 测试集主模态子目录（可选）
+
+    modalities:                          # 模态 → 目录名 映射
+      rgb: images                        #   RGB 图所在目录
+      ir: images_ir                      #   红外图所在目录
+      depth: images_depth                #   深度图所在目录（如有其他模态按需添加）
+
+    modality_used:                       # 本次训练选用的模态组合（顺序：主, 次）
+      - rgb
+      - ir
+
+    names:                               # 类别名（0 起，nc 由 names 数量自动推断）
+      0: People
+      1: Car
+      2: Bus
+      3: Motorcycle
+      4: Lamp
+      5: Truck
+
+字段含义：
+  - path        数据集根目录
+  - train/val/test   各 split 的主模态图子目录（相对 path）
+  - modalities  模态名 → 图像目录名 的映射表。键为模态标识（rgb/ir/thermal/depth/
+                edge/dem 等），值为该模态图像在 path 下的目录名（不含 train/val 子级）。
+                程序据此定位 X 模态图像：
+                  dataset/<modalities["ir"]>/train/000001.jpg
+                若不写 modalities，程序会按约定 images_<模态名> 自动推断目录。
+  - modality_used  本次训练选用的模态列表，顺序为 [主模态, 次模态(X)]。
+                程序根据第 2 个模态确定 X 模态，再从 modalities 查其目录。
+                例如 [rgb, ir] 表示用 RGB 做主模态、ir 做 X 模态。
+  - names       类别名（标准 YOLO 字段），类别数 nc 由 names 条目数自动推断，无需单独写。
+
+注意事项：
+  - modalities 里列出所有可用的模态目录映射，modality_used 只列出本次训练要用的模态。
+  - 若要换成深度模态训练，把 modality_used 改为 [rgb, depth] 即可，无需改目录结构。
+  - 若只训练一种模态（消融实验），modality_used 写 [rgb] 或 [ir] 即可，缺失模态自动零填充。
+
+如果你的 X 模态是【从 RGB 自动生成】的（深度/边缘/高程），请先用第 2.3 节的脚本生成，
+再把 modalities / modality_used 设成对应模态名。
+
+--------------------------------------------------------------------------
+2.3  X 模态自动生成（根目录提供三个生成脚本）
+----------------------------------------------------------------------
+如果你只有 RGB 图，想合成深度/边缘/高程作为 X 模态，项目已提供现成脚本。
+它们都会读 data.yaml，遍历 images/<split>/，把生成的 X 模态写到 images_<x>/ 下。
+
+(A) 高程 DEM 模态 —— DEMGen.py（6 通道，无需权重）
+    用途：用 Sobel/拉普拉斯等算子从 RGB 提取 6 维地形特征（高程/坡度/坡向/曲率/粗糙度/局部高差）。
+    用法：编辑 DEMGen.py，确认里面 gen.run("<你的data.yaml路径>") 指向你的 data.yaml，然后：
+        python DEMGen.py
+    输出：images_dem/<split>/<同名>.npy（6 通道 float32）
+    对应 data.yaml 关键字段：
+      modalities: { rgb: images, dem: images_dem }
+      modality_used: [rgb, dem]
+
+(B) 边缘 Edge 模态 —— edgeGen.py（无需权重）
+    用途：用 Sobel/Scharr 算子从 RGB 提取边缘图。
+    用法：编辑 edgeGen.py，确认 gen.run("<你的data.yaml路径>")，然后：
+        python edgeGen.py
+    输出：images_edge/<split>/<同名>.png（1 或 3 通道）
+    对应 data.yaml 关键字段：
+      modalities: { rgb: images, edge: images_edge }
+      modality_used: [rgb, edge]
+
+(C) 深度 Depth 模态 —— depthGen.py（需 Depth Anything V2 权重）
+    用途：用 Depth Anything V2 模型从 RGB 估计单目深度。
+    用法：编辑 depthGen.py，传入权重路径 weights="<你的权重.pth>"，确认 gen.run(...)，然后：
+        python depthGen.py
+    输出：images_depth/<split>/<同名>.npy（16-bit 深度）
+    对应 data.yaml 关键字段：
+      modalities: { rgb: images, depth: images_depth }
+      modality_used: [rgb, depth]
+    注意：首次使用需自行下载 Depth Anything V2 的 .pth 权重文件。
+
+提示：如果你已经有现成的红外/深度配对数据集，就不需要生成，直接按 2.1/2.2
+整理目录 + 写 data.yaml 即可。
+
+--------------------------------------------------------------------------
+2.4  常见数据问题
+----------------------------------------------------------------------
+  Q: 报错找不到 X 模态图？
+  A: 检查 X 图文件名是否与 RGB 完全一致（含大小写）；检查 data.yaml 的 modalities 里
+     该模态对应的目录名是否正确，不写 modalities 时默认按 images_<模态名> 推断目录名。
+
+  Q: 标注是 .json / .xml 怎么办？
+  A: 本项目只认 YOLO txt 格式（每行：class cx cy w h，归一化坐标）。需先用工具转换。
+
+
+================================================================================
+第 3 章   怎 么 跑 实 验
+================================================================================
+
+本章是核心。按「训练 → 验证 → COCO评测 → 推理」四步主线，外加「可视化 / 导出 /
+预检 / 一键冒烟」等进阶脚本。每类脚本都给可改路径即运行的最小示例。
+
+--------------------------------------------------------------------------
+3.1  训练（trainMM*.py / trainRT*.py）
+----------------------------------------------------------------------
+所有训练脚本结构相同：from ultralytics import YOLOMM(或 RTDETRMM) → 加载 YAML →
+model.train(data=..., epochs=..., ...)。你只需改配置名 + data 路径 + 关键参数。
+
+【YOLOMM 系列】
+  脚本              任务        YAML 配置                 说明
+  ─────────────    ────────    ──────────────────────    ─────────────────────
+  trainMM.py        检测        yolo11n-mm-mid.yaml       最常用，主力范式（中期融合）
+  trainMMseg.py     实例分割    yolo11n-mm-mid-seg.yaml
+  trainMMsemseg.py  语义分割    yolo11n-mm-mid-semseg.yaml
+  trainMMobb.py     旋转框 OBB  yolo11n-mm-obb.yaml       (完整路径见脚本内)
+  trainMMcls.py     分类        yolo11n-mm-mid-cls.yaml   imgsz=224
+  (无 trainMMpose.py 姿态训练脚本，若需姿态任务，参考 trainMMseg.py 改造)
+
+【RTDETRMM 系列】（基于 RT-DETR，骨干为 ResNet，建议用 AdamW + 低学习率）
+  脚本              任务        YAML 配置
+  ─────────────    ────────    ──────────────────────
+  trainRT.py        检测        rtdetr-r18-mm-mid.yaml
+  trainRTobb.py     旋转框 OBB  rtdetr-r18-mm-mid-obb.yaml
+
+以 trainMM.py 为例（YOLOMM 检测，最常用）：
+
+    from ultralytics import YOLOMM
+    if __name__ == '__main__':
+        model = YOLOMM('yolo11n-mm-mid.yaml')          # ← 模型配置名（见第 4 章如何换）
+        model.train(
+            data='<你的data.yaml路径>',                # ← 改成你的 data.yaml
+            epochs=100,                                # 训练轮数
+            batch=16,                                  # 批大小，显存不够就调小
+            imgsz=640,                                 # 输入尺寸
+            scale='n',                                 # ← 模型规模 n/s/m/l/x（见第 4 章）
+            device='0',                                # GPU 编号：'0'/'1'/... 或 '0,1' 多卡
+            cache=True,                                # 缓存数据集加速（内存<32G 改 False）
+            workers=8,                                 # 数据加载线程，Windows 改 0
+            close_mosaic=0,                            # 最后 N 轮关闭 Mosaic（0=全程关闭）
+            exist_ok=True,                             # 输出目录已存在时不新建带编号目录
+            project='ResTest',                         # 输出总目录
+            name='yolomm-test',                        # 本次实验名（结果在 ResTest/yolomm-test/）
+        )
+
+参数速查表（model.train 关键参数）：
+  参数          含义                               常用值
+  ────────     ─────────────────────────          ─────────────
+  data          data.yaml 路径                     必填
+  epochs        训练总轮数                          50~300
+  batch         批大小                             4/8/16/32（按显存）
+  imgsz         输入图像边长                        640（分类用 224）
+  scale         模型规模                           n/s/m/l/x
+  device        GPU 编号                           '0' / '0,1'
+  cache         缓存数据                           True / 'disk' / False
+  workers       数据线程                           8（Win 用 0）
+  optimizer     优化器                             SGD / AdamW（RTDETR 推荐 AdamW）
+  lr0 / lrf     初始/最终学习率                     RTDETR 建议 lr0=1e-4, lrf=1e-3
+  project/name  输出目录                           结果落在 project/name/
+  exist_ok      目录重名处理                        True=覆盖同名目录
+
+提示：脚本顶部常有 os.environ.setdefault('CUDA_VISIBLE_DEVICES', '0')，
+这是另一种指定 GPU 的方式（也可改成 '1' 或 '0,1'）。
+
+单模态消融训练（只用一种模态）：
+    model.train(data='<data.yaml>', modality='thermal')   # 或 'rgb'/'depth'/'x'
+缺失模态会自动零填充，无需改数据。
+
+--------------------------------------------------------------------------
+3.2  验证（valMM*.py / valRT*.py）—— 看基础 mAP
+----------------------------------------------------------------------
+训练完成后，best.pt 在 ResTest/<name>/weights/best.pt。用验证脚本加载权重并评测。
+
+【验证脚本清单】
+  valMM.py / valMMseg.py / valMMobb.py / valMMcls.py / valMMpose.py
+  valRT.py / valRTobb.py
+用法（编辑脚本里的权重路径 + data 路径）：
+
+    from ultralytics import YOLOMM
+    model = YOLOMM('ResTest/yolomm-test/weights/best.pt')   # ← 改成你的训练权重路径
+    model.val(data='<你的data.yaml路径>',
+              split='test',          # 在哪个 split 上评测：train/val/test
+              device='0',
+              project='ResTest', name='yolomm-test-val')
+
+验证会打印：每个类别的 P(精确率) / R(召回率) / F1 / mAP50 / mAP50-95，
+以及全部类别的平均值。详见第 5 章。
+
+--------------------------------------------------------------------------
+3.3  COCO 标准评测（valCOCO*.py）—— 看论文级 12 项指标
+----------------------------------------------------------------------
+如果你需要发表/汇报用的标准 COCO 指标（AP、AP50、AP75、按物体大小细分等），
+用 COCO 评测脚本，它内部调用 model.cocoval()：
+
+  valCOCO.py        YOLOMM 检测的 COCO 评测
+  valCOCOrt.py      RTDETRMM 检测的 COCO 评测
+  valCOCOseg.py     YOLOMM 分割的 COCO 评测
+
+用法（编辑脚本里的权重 + data）：
+    model = YOLOMM('ResTest/.../best.pt')
+    model.cocoval(data='<data.yaml>', split='test', device='0', half=True)
+会输出标准 12 项 COCO 指标，并生成 coco_metrics_*.csv 等详细报告，详见第 5 章。
+
+--------------------------------------------------------------------------
+3.4  推理（predictMM*.py / predictRT*.py）—— 看预测可视化
+----------------------------------------------------------------------
+推理脚本是【多模态配对 API】：用 rgb_source 和 x_source 指定 RGB 与 X 模态输入。
+
+【推理脚本清单】
+  predictMM.py / predictMMseg.py / predictMMobb.py / predictMMpose.py
+  predictRT.py / predictRTobb.py
+  predictMMcls.py（分类，用法略不同，见下）
+
+通用三种模式（编辑脚本里的路径即可）：
+    model = YOLOMM('ResTest/.../best.pt')
+    # 双模态（RGB + X 同时给）
+    model.predict(rgb_source='<rgb图>', x_source='<x模态图>', save=True)
+    # 仅 RGB（X 模态自动零填充）
+    model.predict(rgb_source='<rgb图>', x_source=None,               save=True)
+    # 仅 X（RGB 自动零填充）
+    model.predict(rgb_source=None,      x_source='<x模态图>',         save=True)
+
+  rgb_source / x_source 可以是：单张图路径、一个目录、或一个路径列表（批量）。
+  save=True 会把画好框的结果图存到 project/name/ 下。
+
+批量推理（用 MultiModalSampler 从 data.yaml 抽样配对）：
+    from ultralytics.tools import MultiModalSampler
+    sampler = MultiModalSampler('<data.yaml>', split='test')
+    rgb_list, x_list = sampler.sample_source_list(n=10)     # 抽 10 对
+    model.predict(rgb_source=rgb_list, x_source=x_list, save=True)
+
+分类任务 predictMMcls.py 用法不同（不是 rgb_source/x_source）：
+    model.predict([rgb_img, x_img], name="cls_dual", batch=2)       # 双模态：传列表
+    model.predict(rgb_img, modality="rgb", name="cls_rgb")          # 仅 RGB
+    model.predict(x_img,   modality="x",   name="cls_x")            # 仅 X
+
+--------------------------------------------------------------------------
+3.5  可视化（visMM.py / visRT.py）—— Grad-CAM 热力图
+----------------------------------------------------------------------
+想看模型在 RGB / X 各层关注哪里，用可视化脚本生成 Grad-CAM 热力图：
+    python visMM.py    # 编辑脚本内的权重 + 图路径 + layers=[7,15,18,29] 等
+参数含义详见项目内 wiki/vis_usage.md。常用：method='heat', alg='gradcam',
+overlay='dual'(双模态叠加), colormap='turbo', layout='panel', save=True。
+
+--------------------------------------------------------------------------
+3.6  模型导出（exportMM.py）—— 导出 ONNX/Engine 部署
+----------------------------------------------------------------------
+导出多模态模型需要设置输入通道数，编辑 exportMM.py：
+    WEIGHTS = '<你的best.pt路径>'
+    EXPORT_FORMAT = 'onnx'        # 或 engine / openvino / torchscript
+    IMGSZ = 640
+    XCH = 3                        # ← X 模态通道数（一般热红外/深度等设为 3，DEM 设为 6）
+    # 脚本会自动设置 model.model.yaml['channels'] = 3 + XCH 并配置双模态路由
+    python exportMM.py
+导出文件在权重同目录下。
+
+--------------------------------------------------------------------------
+3.7  预检（preflightMM.py）—— 上 GPU 前先做冒烟测试
+----------------------------------------------------------------------
+正式训练前，可用预检脚本快速验证「这个 YAML 配置能不能跑通」（不消耗大量算力）。
+带命令行参数，用法：
+    python preflightMM.py yolo11n-mm-mid.yaml                          # CPU 跑 1 轮
+    python preflightMM.py yolo11n-mm-mid.yaml --device 0 --iters 3     # GPU 跑 3 轮
+    python preflightMM.py yolo11n-mm-mid.yaml --batch 4 --imgsz 640    # 指定 batch/尺寸
+常用参数：--device(默认cpu) --iters(默认1) --batch(默认2) --imgsz(默认640)
+         --task(detect/segment/obb/...) --scale --half --json
+
+--------------------------------------------------------------------------
+3.8  进阶脚本（了解即可，按需使用）
+----------------------------------------------------------------------
+项目根目录还提供以下进阶脚本，初学者可暂不使用：
+
+  preflightMM.py          上节已介绍，YAML 健康检查 + 前向冒烟
+
+  蒸馏：
+    trainMM_distill_feat.py     特征级知识蒸馏训练
+    trainMM_distill_output.py   输出级知识蒸馏训练
+    train_teacher_s.py          生成教师模型权重
+
+  剪枝 + 微调：
+    pruneMM.py / pruneRTMM.py         模型剪枝（L1/L2/Lamp/BN/random）
+    finetrainMM.py / finetrainRTMM.py 剪枝后微调恢复精度
+
+  性能基准：
+    get_model_fps.py        测 FPS / 吞吐
+    main_profile.py         性能剖析
+    plot-map.py             把多组结果画成 mAP 对比曲线
+
+
+--------------------------------------------------------------------------
+3.9  最短上手路径（TL;DR）
+----------------------------------------------------------------------
+  1) 按 1.2/1.3 建好 Python 环境 + 装好依赖，验证 torch.cuda 可用
+  2) 准备数据 + 写 data.yaml（第 2 章）
+  3) 改 trainMM.py 里的 model 配置名 + data 路径 → python trainMM.py
+  4) 训练完改 valMM.py 里的权重路径 → python valMM.py（看 mAP）
+  5) 想要 COCO 指标 → 改 valCOCO.py → python valCOCO.py
+  6) 想看预测图 → 改 predictMM.py → python predictMM.py
+
+
+================================================================================
+第 4 章   怎 么 更 换 不 同 模 型 以 及 修 改
+================================================================================
+
+本章教你「换个模型 / 改个模块」。多模态模型由【YAML 配置文件】定义，换模型 = 换 YAML。
+
+--------------------------------------------------------------------------
+4.1  核心概念：YAML 第 5 字段（多模态路由）
+----------------------------------------------------------------------
+普通 ultralytics 层定义是 4 字段：[from, repeats, module, args]
+本项目扩展为 5 字段：  [from, repeats, module, args, <路由标签>]
+
+第 5 字段取值：
+  'RGB'   这一层接收 RGB 图作为输入（标记 RGB 支路起点）
+  'X'     这一层接收 X 模态图作为输入（标记 X 支路起点）
+  'Dual'  这一层接收 RGB+X 拼接的多通道（早期融合入口）
+  省略    普通层，沿用上游 from 的输入
+
+例（中期融合 yolo11n-mm-mid.yaml 节选）：
+    - [-1, 1, Conv, [64, 3, 2], 'RGB']   # ← RGB 支路从这里开始
+    ...（RGB 骨干若干层）...
+    - [-1, 1, Conv, [64, 3, 2], 'X']     # ← X 支路从这里开始
+    ...（X 骨干若干层）...
+    - [[某RGB层, 某X层], 1, Concat, [1]] # ← 中层把两路特征拼接（融合）
+理解了第 5 字段，你就理解了本项目的多模态精髓：配置即路由。
+
+三种主流融合范式（换 YAML 即换范式）：
+  - 早期融合  首层 'Dual'，RGB+X 6 通道统一进网络
+  - 中期融合  'RGB'+'X' 双骨干，中高层 Concat（主力范式，推荐起点）
+  - 晚期融合  双骨干各自走，仅高层语义层融合
+
+--------------------------------------------------------------------------
+4.2  切换融合范式
+----------------------------------------------------------------------
+修改训练脚本里的 model 配置名：
+  早期融合：YOLOMM('yolo11n-mm-early.yaml')
+  中期融合：YOLOMM('yolo11n-mm-mid.yaml')      ← 默认推荐
+  晚期融合：YOLOMM('yolo11n-mm-late-ref.yaml')
+（这些配置文件位于 ultralytics/cfg/models/mm/ 对应任务子目录下，也可直接写全路径，
+  框架都能解析。）
+
+--------------------------------------------------------------------------
+4.3  切换模型规模（n / s / m / l / x）
+----------------------------------------------------------------------
+模型大小由 scale 字母控制（depth/width 倍率）。规模越大越准也越慢越吃显存。
+
+切换方法（二选一）：
+  方法 1：改文件名字母。把配置名里的 n 换成 s，如 YOLOMM('yolo11s-mm-mid.yaml')。
+           （框架会从文件名自动识别规模。）
+  方法 2：用 model_scale 参数显式指定：
+           model.train(data=..., model_scale='s')
+
+  【重要易错点】注意区分两个同名参数：
+    - train() 里的 scale='n'  —— 在本项目训练脚本里指【模型规模】
+    - ultralytics 配置里的 scale（图像缩放增强）—— 是【数据增强】参数
+  为避免混淆，改模型大小时优先用 model_scale= 这个名字。
+
+RTDETRMM 系列配置里通常只定义了 l 规模，所以 RTDETRMM 默认就是 l。
+
+--------------------------------------------------------------------------
+4.4  切换任务（检测 / 分割 / 旋转框 / 姿态 / 分类 / 语义分割）
+----------------------------------------------------------------------
+换任务 = 换带对应检测头的 YAML + 用对应训练脚本：
+  检测 detect    yolo11n-mm-mid.yaml          + trainMM.py
+  实例分割 seg   yolo11n-mm-mid-seg.yaml      + trainMMseg.py
+  语义分割       yolo11n-mm-mid-semseg.yaml   + trainMMsemseg.py
+  旋转框 obb     yolo11n-mm-obb.yaml          + trainMMobb.py
+  姿态 pose      （无现成训练脚本，仿 trainMMseg.py + pose 配置）
+  分类 cls       yolo11n-mm-mid-cls.yaml      + trainMMcls.py（imgsz=224）
+不同任务的差别主要在【最后一层检测头】（Detect / Segment / OBB / Pose / Classify）。
+
+--------------------------------------------------------------------------
+4.5  替换网络模块（换骨干 / 颈部 / 检测头 / 注意力 / 融合块）
+----------------------------------------------------------------------
+项目在 ultralytics/cfg/models/mm/<任务>/yolo11/ 下准备了大量「换好某个模块」的现成
+配置，直接拿来用即可，无需自己写代码：
+
+  子目录          替换内容                     示例文件
+  ────────       ──────────────────          ───────────────────────
+  base/           融合范式基准                 yolo11n-mm-mid.yaml
+  extraction/     骨干特征提取模块             yolo11n-mm-c2psa.yaml
+  change/         融合/注意力模块              yolo11n-mm-mid-aca.yaml
+  neck/           颈部结构                     yolo11n-mm-mid-slimneck.yaml
+  head/           检测头                       yolo11n-mm-mid-lscd.yaml
+  attention/      注意力模块                   yolo11n-mm-attn-*.yaml
+  mamba/          Mamba/SSM 模块               yolo11n-mm-mamba-vss.yaml
+
+用法：把训练脚本里的 model 配置名换成对应文件名即可，例如想试 C2PSA 骨干：
+    model = YOLOMM('yolo11n-mm-c2psa.yaml')
+
+--------------------------------------------------------------------------
+4.6  切换到 RTDETRMM
+----------------------------------------------------------------------
+RTDETRMM 是独立的模型家族（骨干 ResNet、编码器 AIFI、解码器 RTDETRDecoder），
+配置在 ultralytics/cfg/models/rtmm/，训练用 trainRT.py / trainRTobb.py。
+与 YOLOMM 的区别（训练时要注意）：
+  - 优化器建议 AdamW，学习率较低：optimizer='AdamW', lr0=1e-4, lrf=1e-3
+  - 规模默认 l（不强调 n/s/m/l/x）
+  - 第 5 字段 RGB/X/Dual 路由机制与 YOLOMM 完全一致
+
+--------------------------------------------------------------------------
+4.7  新增 / 自定义模块（进阶）
+----------------------------------------------------------------------
+如果想加入论文里的新模块，严格按项目内置规范文档操作：
+    ultralytics/nn/MODULE_ADDING_GUIDE.md   （YOLOMM 模块添加规范指南）
+
+5 步流程：
+  1) 写模块代码到对应目录（融合→nn/modules/fusion/、骨干→nn/extraction/、
+     颈部→nn/Neck/、通用→nn/public/ 等），文件内声明 __all__。
+  2) 在该目录的 __init__.py 里导出并加入 __all__。
+  3) 在 ultralytics/nn/tasks.py 注册模块（导入 + try/except 兜底）。
+  4) 在 tasks.py 的 parse_model() 里给新模块加通道处理分支（elif m is YourModule:），
+     从 ch[f] 取实际通道，切勿直接用 args[0]。
+  5) 写 YAML 配置（用 5 字段格式）放到 cfg/models/mm/... 下，即可用 YOLOMM('xxx.yaml') 调用。
+
+
+================================================================================
+第 5 章   怎 么 查 看 指 标
+================================================================================
+
+训练/验证的产物都在 project/name/ 目录下（默认 ResTest/<实验名>/）。
+
+--------------------------------------------------------------------------
+5.1  训练输出目录里有什么
+----------------------------------------------------------------------
+  文件                          内容 / 用途
+  ──────────────────────────   ──────────────────────────────────────
+  weights/best.pt               最优权重（按 mAP50-95 选出），推理用它
+  weights/last.pt               最后一轮权重，可用于断点续训
+  results.csv                   每个 epoch 一行的指标表（最重要）
+  results.png                   训练曲线图（损失 + mAP + 学习率）
+  confusion_matrix.png          混淆矩阵（看哪些类易混淆）
+  args.yaml                     本次训练所有参数快照（复现实验用）
+  val_batch*_labels.jpg         验证集真值可视化（RGB + X 并排）
+  val_batch*_pred.jpg           验证集预测可视化
+  predictions.json              仅当 val/predict 传 save_json=True 时生成
+  (COCO 评测额外产物见 5.3)
+
+--------------------------------------------------------------------------
+5.2  标准 val 指标（model.val 打印的）
+----------------------------------------------------------------------
+valMM.py 等脚本运行后，终端会打印一张表，列为：
+    Class | Images | Instances | Box(P | R | F1 | mAP50 | mAP50-95)
+
+含义：
+  P           精确率 Precision
+  R           召回率 Recall
+  F1          F1 分数（本项目额外加的列）
+  mAP50       IoU=0.5 时的平均精度
+  mAP50-95    IoU 从 0.5 到 0.95（步长 0.05）的平均精度（最权威的检测指标）
+每个类别一行，最后一行 all 是全部类别平均。看「all」行的 mAP50-95 即可横向比较模型。
+
+--------------------------------------------------------------------------
+5.3  COCO 标准 12 项指标（model.cocoval，论文级）
+----------------------------------------------------------------------
+valCOCO.py / valCOCOrt.py 运行后，会输出标准 COCO 指标并生成多个报告文件：
+
+  精确率类(AP)：
+    AP          mAP@IoU 0.50:0.95（主指标）
+    AP50        mAP@0.50
+    AP75        mAP@0.75
+    APsmall     小目标 AP
+    APmedium    中目标 AP
+    APlarge     大目标 AP
+  召回率类(AR)：
+    AR1 / AR10 / AR100    每图最多 1/10/100 个检测的平均召回
+    ARsmall / ARmedium / APlarge   按大小的平均召回
+
+COCO 评测额外产物（在输出目录下）：
+  coco_metrics_by_class.csv         逐类 AP/AP50/AP75/F1
+  coco_metrics_by_size.csv          按目标大小的 AP
+  coco_metrics_overall.csv          总体指标（含 FPS / 参数量 / GFLOPs）
+  coco_metrics_comprehensive.csv    长格式完整指标
+  coco_results.json                 12 项指标 + 逐类 + 速度 + 配置的 JSON
+  coco_summary.txt                  可读的文本总结
+
+--------------------------------------------------------------------------
+5.4  读 results.csv 看训练曲线
+----------------------------------------------------------------------
+用 Excel / WPS / pandas 打开 results.csv，主要列：
+  epoch                              轮次
+  train/box_loss, train/cls_loss,    训练损失（越低越好）
+  train/dfl_loss
+  metrics/precision(B), recall(B)    验证精确率/召回率
+  metrics/mAP50(B), mAP50-95(B)      验证 mAP（越高越好，核心看这列）
+  val/box_loss, val/cls_loss, ...    验证损失
+  lr/pg0, lr/pg1, lr/pg2             各参数组学习率
+最后一行 = 最后一轮。直接看 results.png 也能直观看到曲线趋势。
+
+判断训练好坏的经验：
+  - mAP50-95 持续上升并平稳 → 训练正常
+  - 训练损失下降但验证 mAP 不升甚至下降 → 过拟合，考虑加数据 / 早停 / 减规模
+  - mAP 一直很低 → 检查 data.yaml 的 nc/names、标注质量、X 模态配对是否正确
+
+--------------------------------------------------------------------------
+5.5  推荐指标查看工作流
+----------------------------------------------------------------------
+  1) python valMM.py        → 终端看 all 行的 mAP50 / mAP50-95（快速判断）
+  2) 打开 results.png       → 看训练曲线是否健康
+  3) python valCOCO.py      → 拿论文级 12 项 COCO 指标 + 4 张 CSV 报告
+  4) 打开 confusion_matrix.png → 看类别间误检情况，针对性改进
+  5) python predictMM.py    → 人眼抽检预测框是否合理
+
+
+================================================================================
+附 录：脚本速查总表
+================================================================================
+
+【训练】
+  trainMM.py         YOLOMM 检测
+  trainMMseg.py      YOLOMM 实例分割
+  trainMMsemseg.py   YOLOMM 语义分割
+  trainMMobb.py      YOLOMM 旋转框
+  trainMMcls.py      YOLOMM 分类
+  trainRT.py         RTDETRMM 检测
+  trainRTobb.py      RTDETRMM 旋转框
+
+【验证 / 评测】
+  valMM.py / valMMseg.py / valMMobb.py / valMMcls.py / valMMpose.py
+  valRT.py / valRTobb.py
+  valCOCO.py / valCOCOrt.py / valCOCOseg.py     （COCO 12 项指标）
+
+【推理】
+  predictMM.py / predictMMseg.py / predictMMobb.py / predictMMpose.py / predictMMcls.py
+  predictRT.py / predictRTobb.py
+
+【模态生成】
+  DEMGen.py          生成高程 DEM（6 通道，无需权重）
+  edgeGen.py         生成边缘 Edge（无需权重）
+  depthGen.py        生成深度 Depth（需 Depth Anything V2 权重）
+
+【可视化 / 导出 / 检查 / 进阶】
+  visMM.py / visRT.py             Grad-CAM 热力图
+  preflightMM.py                  YAML 预检 + 前向冒烟（带命令行参数）
+  pruneMM.py / pruneRTMM.py       剪枝
+  finetrainMM.py / finetrainRTMM.py  剪枝后微调
+  trainMM_distill_feat.py / trainMM_distill_output.py  蒸馏
+  get_model_fps.py                FPS 基准
+  plot-map.py                     mAP 对比曲线
+
+
+================================================================================
+如遇到本指南未覆盖的问题，请把以下信息提供给技术支持：
+  1) 你运行的具体命令 / 脚本名
+  2) data.yaml 内容（可隐去绝对路径）
+  3) 完整报错信息（终端最后 20~30 行）
+  4) nvidia-smi 与 python -c "import torch;print(torch.__version__,torch.cuda.is_available())" 的输出
+================================================================================

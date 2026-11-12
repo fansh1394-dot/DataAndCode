@@ -1,0 +1,29 @@
+# 跨分辨率特征蒸馏配置（尺度蒸馏）
+# 教师：mdp150_M0_concat_s0（与 640 推理对照的 +2.6σ 来自该权重在 800 推理）
+# 教师按 imgsz=800 前向，学生保持训练 imgsz=640；特征由 losses.py 的
+# F.interpolate 对齐到学生空间尺寸。仅做特征 KD，不做输出 KD
+# （四头模型输出为 dict(branch->raw)，anchor 数在 800/640 下也不相等）。
+version: 1
+
+teachers:
+  - name: teacher_dual800
+    role: dual
+    imgsz: 800
+    weights: /3250410011/root/rivermind-data/MutilModel_3485988898/YOLO26/ResTest/mdp150_M0_concat_s0/weights/best.pt
+
+mappings:
+  feature:
+    # 融合颈 P3 / P4 / P5（Concat + 1×1 Conv 之后的 C3k2 输出，即 fuse 头的输入）
+    # 层号依据 yolo26n-mm-dual-fusion-concat.yaml：48=fuse P3、51=fuse P4、54=fuse P5
+    - teacher: teacher_dual800
+      teacher_layer: 48
+      student_layer: 48
+      tap: output
+    - teacher: teacher_dual800
+      teacher_layer: 51
+      student_layer: 51
+      tap: output
+    - teacher: teacher_dual800
+      teacher_layer: 54
+      student_layer: 54
+      tap: output

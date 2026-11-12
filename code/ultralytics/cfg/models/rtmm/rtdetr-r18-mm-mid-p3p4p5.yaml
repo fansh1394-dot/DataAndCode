@@ -1,0 +1,70 @@
+# YOLOMM|RTDETRMM 多模态项目,汤圆版权所有,仅限学术用途
+# RTDETRMM-r18 Detect Base: P3/P4/P5 Full Mid Fusion
+# 思路: 在所有 RT-DETR 关键语义层级上显式融合 RGB/X 特征。
+# 核心策略: RGB/X 双路均提取到 P5，分别融合 P3/P4/P5，再送入标准 RTDETRDecoder。
+# 设计原则: 优先提高跨模态互补能力，接受更高计算成本。
+# 适用场景: RGB 与 X 模态在多尺度上都有强互补信息的复杂检测任务。
+# Decoder contract: keep RTDETRDecoder inputs as P3/P4/P5.
+
+nc: 80
+scales:
+  l: [1.00, 1.00, 1024]
+
+backbone:
+  # RGB stem
+  - [-1, 1, ConvNormLayer, [32, 3, 2, None, False, 'relu'], 'RGB'] # 0-P1/2
+  - [-1, 1, ConvNormLayer, [32, 3, 1, None, False, 'relu']] # 1
+  - [-1, 1, ConvNormLayer, [64, 3, 1, None, False, 'relu']] # 2
+  - [-1, 1, nn.MaxPool2d, [3, 2, 1]] # 3-P2/4
+
+  # X stem
+  - [-1, 1, ConvNormLayer, [32, 3, 2, None, False, 'relu'], 'X'] # 4-P1/2
+  - [-1, 1, ConvNormLayer, [32, 3, 1, None, False, 'relu']] # 5
+  - [-1, 1, ConvNormLayer, [64, 3, 1, None, False, 'relu']] # 6
+  - [-1, 1, nn.MaxPool2d, [3, 2, 1]] # 7-P2/4
+
+  # RGB branch to P5
+  - [3, 1, Blocks, [64, BasicBlock, 2, 2, 'relu']] # 8-RGB P2
+  - [-1, 1, Blocks, [128, BasicBlock, 2, 3, 'relu']] # 9-RGB P3/8
+  - [-1, 1, Blocks, [256, BasicBlock, 2, 4, 'relu']] # 10-RGB P4/16
+  - [-1, 1, Blocks, [512, BasicBlock, 2, 5, 'relu']] # 11-RGB P5/32
+
+  # X branch to P5
+  - [7, 1, Blocks, [64, BasicBlock, 2, 2, 'relu']] # 12-X P2
+  - [-1, 1, Blocks, [128, BasicBlock, 2, 3, 'relu']] # 13-X P3/8
+  - [-1, 1, Blocks, [256, BasicBlock, 2, 4, 'relu']] # 14-X P4/16
+  - [-1, 1, Blocks, [512, BasicBlock, 2, 5, 'relu']] # 15-X P5/32
+
+  # P3/P4/P5 fusion
+  - [[9, 13], 1, Concat, [1]] # 16-P3 RGB+X
+  - [-1, 1, Conv, [256, 1, 1]] # 17-Fused P3
+  - [[10, 14], 1, Concat, [1]] # 18-P4 RGB+X
+  - [-1, 1, Conv, [256, 1, 1]] # 19-Fused P4
+  - [[11, 15], 1, Concat, [1]] # 20-P5 RGB+X
+  - [-1, 1, Conv, [512, 1, 1]] # 21-Fused P5
+
+head:
+  - [21, 1, Conv, [256, 1, 1, None, 1, 1, False]] # 22 input_proj.2
+  - [-1, 1, AIFI, [1024, 8]] # 23
+  - [-1, 1, Conv, [256, 1, 1]] # 24 Y5
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 25
+  - [19, 1, Conv, [256, 1, 1, None, 1, 1, False]] # 26 input_proj.1
+  - [[-2, -1], 1, Concat, [1]] # 27
+  - [-1, 3, RepC3, [256, 0.5]] # 28
+  - [-1, 1, Conv, [256, 1, 1]] # 29 Y4
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 30
+  - [17, 1, Conv, [256, 1, 1, None, 1, 1, False]] # 31 input_proj.0
+  - [[-2, -1], 1, Concat, [1]] # 32
+  - [-1, 3, RepC3, [256, 0.5]] # 33 P3
+
+  - [-1, 1, Conv, [256, 3, 2]] # 34
+  - [[-1, 29], 1, Concat, [1]] # 35
+  - [-1, 3, RepC3, [256, 0.5]] # 36 P4
+
+  - [-1, 1, Conv, [256, 3, 2]] # 37
+  - [[-1, 24], 1, Concat, [1]] # 38
+  - [-1, 3, RepC3, [256, 0.5]] # 39 P5
+
+  - [[33, 36, 39], 1, RTDETRDecoder, [nc, 256, 300, 4, 8, 3]]

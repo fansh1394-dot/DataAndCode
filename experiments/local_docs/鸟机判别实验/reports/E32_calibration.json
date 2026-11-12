@@ -1,0 +1,389 @@
+{
+ "K": 5,
+ "N": 3,
+ "tracks": {
+  "avid_bird": 50,
+  "avid_drone": 15,
+  "syn_other": 34
+ },
+ "sweep": [
+  {
+   "tau_drone": 0.2,
+   "drone_recall": 1.0,
+   "bird_fp": 4,
+   "bird_fp_rate": 0.08,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.25,
+   "drone_recall": 1.0,
+   "bird_fp": 4,
+   "bird_fp_rate": 0.08,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.3,
+   "drone_recall": 1.0,
+   "bird_fp": 3,
+   "bird_fp_rate": 0.06,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.35,
+   "drone_recall": 1.0,
+   "bird_fp": 3,
+   "bird_fp_rate": 0.06,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.4,
+   "drone_recall": 1.0,
+   "bird_fp": 3,
+   "bird_fp_rate": 0.06,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.45,
+   "drone_recall": 1.0,
+   "bird_fp": 3,
+   "bird_fp_rate": 0.06,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.5,
+   "drone_recall": 1.0,
+   "bird_fp": 3,
+   "bird_fp_rate": 0.06,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.55,
+   "drone_recall": 1.0,
+   "bird_fp": 3,
+   "bird_fp_rate": 0.06,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.6,
+   "drone_recall": 1.0,
+   "bird_fp": 3,
+   "bird_fp_rate": 0.06,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.65,
+   "drone_recall": 1.0,
+   "bird_fp": 3,
+   "bird_fp_rate": 0.06,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.7,
+   "drone_recall": 1.0,
+   "bird_fp": 3,
+   "bird_fp_rate": 0.06,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.75,
+   "drone_recall": 1.0,
+   "bird_fp": 3,
+   "bird_fp_rate": 0.06,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.8,
+   "drone_recall": 1.0,
+   "bird_fp": 2,
+   "bird_fp_rate": 0.04,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.85,
+   "drone_recall": 0.8,
+   "bird_fp": 0,
+   "bird_fp_rate": 0.0,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  },
+  {
+   "tau_drone": 0.9,
+   "drone_recall": 0.0667,
+   "bird_fp": 0,
+   "bird_fp_rate": 0.0,
+   "other_fp": 0,
+   "other_fp_rate": 0.0
+  }
+ ],
+ "all": {
+  "n": {
+   "bird": 50,
+   "drone": 15,
+   "other": 34
+  },
+  "sweep": [
+   {
+    "tau_drone": 0.2,
+    "drone_recall": 1.0,
+    "bird_fp": 4,
+    "bird_fp_rate": 0.08,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.25,
+    "drone_recall": 1.0,
+    "bird_fp": 4,
+    "bird_fp_rate": 0.08,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.3,
+    "drone_recall": 1.0,
+    "bird_fp": 3,
+    "bird_fp_rate": 0.06,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.35,
+    "drone_recall": 1.0,
+    "bird_fp": 3,
+    "bird_fp_rate": 0.06,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.4,
+    "drone_recall": 1.0,
+    "bird_fp": 3,
+    "bird_fp_rate": 0.06,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.45,
+    "drone_recall": 1.0,
+    "bird_fp": 3,
+    "bird_fp_rate": 0.06,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.5,
+    "drone_recall": 1.0,
+    "bird_fp": 3,
+    "bird_fp_rate": 0.06,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.55,
+    "drone_recall": 1.0,
+    "bird_fp": 3,
+    "bird_fp_rate": 0.06,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.6,
+    "drone_recall": 1.0,
+    "bird_fp": 3,
+    "bird_fp_rate": 0.06,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.65,
+    "drone_recall": 1.0,
+    "bird_fp": 3,
+    "bird_fp_rate": 0.06,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.7,
+    "drone_recall": 1.0,
+    "bird_fp": 3,
+    "bird_fp_rate": 0.06,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.75,
+    "drone_recall": 1.0,
+    "bird_fp": 3,
+    "bird_fp_rate": 0.06,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.8,
+    "drone_recall": 1.0,
+    "bird_fp": 2,
+    "bird_fp_rate": 0.04,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.85,
+    "drone_recall": 0.8,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.9,
+    "drone_recall": 0.0667,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   }
+  ]
+ },
+ "a_level_ge16px": {
+  "n": {
+   "bird": 9,
+   "drone": 8,
+   "other": 27
+  },
+  "sweep": [
+   {
+    "tau_drone": 0.2,
+    "drone_recall": 1.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.25,
+    "drone_recall": 1.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.3,
+    "drone_recall": 1.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.35,
+    "drone_recall": 1.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.4,
+    "drone_recall": 1.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.45,
+    "drone_recall": 1.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.5,
+    "drone_recall": 1.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.55,
+    "drone_recall": 1.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.6,
+    "drone_recall": 1.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.65,
+    "drone_recall": 1.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.7,
+    "drone_recall": 1.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.75,
+    "drone_recall": 1.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.8,
+    "drone_recall": 1.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.85,
+    "drone_recall": 0.75,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   },
+   {
+    "tau_drone": 0.9,
+    "drone_recall": 0.0,
+    "bird_fp": 0,
+    "bird_fp_rate": 0.0,
+    "other_fp": 0,
+    "other_fp_rate": 0.0
+   }
+  ]
+ }
+}

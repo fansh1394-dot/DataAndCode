@@ -1,0 +1,928 @@
+{
+  "version": 1,
+  "created": "2026-11-10",
+  "seed": 20261110,
+  "unit": "video",
+  "policy": {
+    "avid": "官方 Train 内按视频 80/20 分层生成 train/val；官方 Val 只作外部 test，不参与训练与调参",
+    "forbid": "禁止按帧随机划分；同一视频、同一拍摄日不得跨集",
+    "mendeley": "沿用项目既有 train/val/test；test 只作 UAV 护栏"
+  },
+  "sources": {
+    "avid": {
+      "root": "/root/rivermind-fs/AVID",
+      "modality": [
+        "rgb",
+        "ir"
+      ],
+      "alignment": "weak",
+      "label_space": {
+        "0": "bird",
+        "1": "drone"
+      },
+      "label_files": "每帧一套 YOLO 标签，RGB 坐标；无独立 IR 框",
+      "splits": {
+        "train": [
+          {
+            "video": "BIRD_00362",
+            "class": "bird",
+            "frames": 167,
+            "bird": 191,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_00463",
+            "class": "bird",
+            "frames": 311,
+            "bird": 311,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_00665",
+            "class": "bird",
+            "frames": 213,
+            "bird": 318,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_00766",
+            "class": "bird",
+            "frames": 307,
+            "bird": 307,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_00968",
+            "class": "bird",
+            "frames": 325,
+            "bird": 1229,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_01069",
+            "class": "bird",
+            "frames": 210,
+            "bird": 227,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_01170",
+            "class": "bird",
+            "frames": 318,
+            "bird": 539,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_01271",
+            "class": "bird",
+            "frames": 328,
+            "bird": 392,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_01372",
+            "class": "bird",
+            "frames": 322,
+            "bird": 322,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_01473",
+            "class": "bird",
+            "frames": 296,
+            "bird": 475,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_01675",
+            "class": "bird",
+            "frames": 328,
+            "bird": 412,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_01776",
+            "class": "bird",
+            "frames": 306,
+            "bird": 863,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_01877",
+            "class": "bird",
+            "frames": 304,
+            "bird": 305,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_01978",
+            "class": "bird",
+            "frames": 316,
+            "bird": 374,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_02180",
+            "class": "bird",
+            "frames": 323,
+            "bird": 461,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_02281",
+            "class": "bird",
+            "frames": 323,
+            "bird": 515,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_02382",
+            "class": "bird",
+            "frames": 327,
+            "bird": 797,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_02483",
+            "class": "bird",
+            "frames": 309,
+            "bird": 309,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_02584",
+            "class": "bird",
+            "frames": 319,
+            "bird": 319,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_02685",
+            "class": "bird",
+            "frames": 267,
+            "bird": 267,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_02786",
+            "class": "bird",
+            "frames": 318,
+            "bird": 318,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_02887",
+            "class": "bird",
+            "frames": 318,
+            "bird": 318,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_02988",
+            "class": "bird",
+            "frames": 254,
+            "bird": 254,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_03089",
+            "class": "bird",
+            "frames": 327,
+            "bird": 327,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_03291",
+            "class": "bird",
+            "frames": 326,
+            "bird": 326,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_03392",
+            "class": "bird",
+            "frames": 318,
+            "bird": 318,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_03493",
+            "class": "bird",
+            "frames": 308,
+            "bird": 308,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_03594",
+            "class": "bird",
+            "frames": 311,
+            "bird": 311,
+            "drone": 0
+          },
+          {
+            "video": "DRONE_001111",
+            "class": "drone",
+            "frames": 301,
+            "bird": 0,
+            "drone": 301
+          },
+          {
+            "video": "DRONE_002112",
+            "class": "drone",
+            "frames": 301,
+            "bird": 0,
+            "drone": 301
+          },
+          {
+            "video": "DRONE_003113",
+            "class": "drone",
+            "frames": 313,
+            "bird": 0,
+            "drone": 313
+          },
+          {
+            "video": "DRONE_004114",
+            "class": "drone",
+            "frames": 303,
+            "bird": 0,
+            "drone": 303
+          },
+          {
+            "video": "DRONE_005115",
+            "class": "drone",
+            "frames": 305,
+            "bird": 0,
+            "drone": 305
+          },
+          {
+            "video": "DRONE_006116",
+            "class": "drone",
+            "frames": 307,
+            "bird": 0,
+            "drone": 307
+          },
+          {
+            "video": "DRONE_007117",
+            "class": "drone",
+            "frames": 224,
+            "bird": 0,
+            "drone": 224
+          },
+          {
+            "video": "DRONE_008118",
+            "class": "drone",
+            "frames": 150,
+            "bird": 0,
+            "drone": 150
+          },
+          {
+            "video": "DRONE_012122",
+            "class": "drone",
+            "frames": 320,
+            "bird": 0,
+            "drone": 320
+          },
+          {
+            "video": "DRONE_013123",
+            "class": "drone",
+            "frames": 328,
+            "bird": 0,
+            "drone": 328
+          },
+          {
+            "video": "DRONE_014124",
+            "class": "drone",
+            "frames": 328,
+            "bird": 0,
+            "drone": 328
+          },
+          {
+            "video": "DRONE_015125",
+            "class": "drone",
+            "frames": 328,
+            "bird": 0,
+            "drone": 328
+          },
+          {
+            "video": "DRONE_016126",
+            "class": "drone",
+            "frames": 310,
+            "bird": 0,
+            "drone": 310
+          },
+          {
+            "video": "DRONE_017127",
+            "class": "drone",
+            "frames": 328,
+            "bird": 0,
+            "drone": 328
+          },
+          {
+            "video": "DRONE_018128",
+            "class": "drone",
+            "frames": 292,
+            "bird": 0,
+            "drone": 292
+          },
+          {
+            "video": "DRONE_019129",
+            "class": "drone",
+            "frames": 50,
+            "bird": 0,
+            "drone": 50
+          },
+          {
+            "video": "DRONE_022132",
+            "class": "drone",
+            "frames": 301,
+            "bird": 0,
+            "drone": 301
+          },
+          {
+            "video": "DRONE_023133",
+            "class": "drone",
+            "frames": 301,
+            "bird": 0,
+            "drone": 301
+          },
+          {
+            "video": "DRONE_025135",
+            "class": "drone",
+            "frames": 205,
+            "bird": 0,
+            "drone": 205
+          },
+          {
+            "video": "DRONE_026136",
+            "class": "drone",
+            "frames": 150,
+            "bird": 0,
+            "drone": 150
+          },
+          {
+            "video": "DRONE_027137",
+            "class": "drone",
+            "frames": 307,
+            "bird": 0,
+            "drone": 307
+          },
+          {
+            "video": "DRONE_029139",
+            "class": "drone",
+            "frames": 301,
+            "bird": 0,
+            "drone": 301
+          },
+          {
+            "video": "DRONE_030140",
+            "class": "drone",
+            "frames": 322,
+            "bird": 0,
+            "drone": 322
+          },
+          {
+            "video": "DRONE_032142",
+            "class": "drone",
+            "frames": 124,
+            "bird": 0,
+            "drone": 124
+          },
+          {
+            "video": "DRONE_036146",
+            "class": "drone",
+            "frames": 202,
+            "bird": 0,
+            "drone": 202
+          },
+          {
+            "video": "DRONE_037147",
+            "class": "drone",
+            "frames": 300,
+            "bird": 0,
+            "drone": 300
+          },
+          {
+            "video": "DRONE_038148",
+            "class": "drone",
+            "frames": 130,
+            "bird": 0,
+            "drone": 130
+          },
+          {
+            "video": "DRONE_040150",
+            "class": "drone",
+            "frames": 311,
+            "bird": 0,
+            "drone": 311
+          },
+          {
+            "video": "DRONE_041151",
+            "class": "drone",
+            "frames": 78,
+            "bird": 0,
+            "drone": 78
+          },
+          {
+            "video": "DRONE_042152",
+            "class": "drone",
+            "frames": 303,
+            "bird": 0,
+            "drone": 303
+          },
+          {
+            "video": "DRONE_045155",
+            "class": "drone",
+            "frames": 323,
+            "bird": 0,
+            "drone": 323
+          },
+          {
+            "video": "DRONE_047157",
+            "class": "drone",
+            "frames": 100,
+            "bird": 0,
+            "drone": 100
+          },
+          {
+            "video": "DRONE_053163",
+            "class": "drone",
+            "frames": 170,
+            "bird": 0,
+            "drone": 170
+          },
+          {
+            "video": "DRONE_054164",
+            "class": "drone",
+            "frames": 301,
+            "bird": 0,
+            "drone": 301
+          },
+          {
+            "video": "DRONE_055165",
+            "class": "drone",
+            "frames": 301,
+            "bird": 0,
+            "drone": 301
+          },
+          {
+            "video": "DRONE_056166",
+            "class": "drone",
+            "frames": 305,
+            "bird": 0,
+            "drone": 305
+          },
+          {
+            "video": "DRONE_057167",
+            "class": "drone",
+            "frames": 329,
+            "bird": 0,
+            "drone": 329
+          },
+          {
+            "video": "DRONE_058168",
+            "class": "drone",
+            "frames": 305,
+            "bird": 0,
+            "drone": 305
+          },
+          {
+            "video": "DRONE_059169",
+            "class": "drone",
+            "frames": 329,
+            "bird": 0,
+            "drone": 329
+          },
+          {
+            "video": "DRONE_061171",
+            "class": "drone",
+            "frames": 308,
+            "bird": 0,
+            "drone": 308
+          },
+          {
+            "video": "DRONE_062172",
+            "class": "drone",
+            "frames": 315,
+            "bird": 0,
+            "drone": 315
+          },
+          {
+            "video": "DRONE_063173",
+            "class": "drone",
+            "frames": 199,
+            "bird": 0,
+            "drone": 199
+          },
+          {
+            "video": "DRONE_064174",
+            "class": "drone",
+            "frames": 316,
+            "bird": 0,
+            "drone": 316
+          },
+          {
+            "video": "DRONE_066176",
+            "class": "drone",
+            "frames": 326,
+            "bird": 0,
+            "drone": 326
+          },
+          {
+            "video": "DRONE_069179",
+            "class": "drone",
+            "frames": 316,
+            "bird": 0,
+            "drone": 316
+          },
+          {
+            "video": "DRONE_070180",
+            "class": "drone",
+            "frames": 305,
+            "bird": 0,
+            "drone": 305
+          },
+          {
+            "video": "DRONE_071181",
+            "class": "drone",
+            "frames": 315,
+            "bird": 0,
+            "drone": 315
+          },
+          {
+            "video": "DRONE_073183",
+            "class": "drone",
+            "frames": 120,
+            "bird": 0,
+            "drone": 120
+          },
+          {
+            "video": "DRONE_074184",
+            "class": "drone",
+            "frames": 316,
+            "bird": 0,
+            "drone": 316
+          },
+          {
+            "video": "DRONE_076186",
+            "class": "drone",
+            "frames": 306,
+            "bird": 0,
+            "drone": 306
+          },
+          {
+            "video": "DRONE_077187",
+            "class": "drone",
+            "frames": 316,
+            "bird": 0,
+            "drone": 316
+          },
+          {
+            "video": "DRONE_078188",
+            "class": "drone",
+            "frames": 300,
+            "bird": 0,
+            "drone": 300
+          },
+          {
+            "video": "DRONE_079189",
+            "class": "drone",
+            "frames": 311,
+            "bird": 0,
+            "drone": 311
+          },
+          {
+            "video": "DRONE_080190",
+            "class": "drone",
+            "frames": 300,
+            "bird": 0,
+            "drone": 300
+          }
+        ],
+        "val": [
+          {
+            "video": "BIRD_00160",
+            "class": "bird",
+            "frames": 139,
+            "bird": 139,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_00261",
+            "class": "bird",
+            "frames": 310,
+            "bird": 310,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_00867",
+            "class": "bird",
+            "frames": 321,
+            "bird": 570,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_01574",
+            "class": "bird",
+            "frames": 329,
+            "bird": 375,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_02079",
+            "class": "bird",
+            "frames": 327,
+            "bird": 676,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_03190",
+            "class": "bird",
+            "frames": 301,
+            "bird": 301,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_03695",
+            "class": "bird",
+            "frames": 329,
+            "bird": 329,
+            "drone": 0
+          },
+          {
+            "video": "DRONE_021131",
+            "class": "drone",
+            "frames": 309,
+            "bird": 0,
+            "drone": 309
+          },
+          {
+            "video": "DRONE_034144",
+            "class": "drone",
+            "frames": 300,
+            "bird": 0,
+            "drone": 300
+          },
+          {
+            "video": "DRONE_043153",
+            "class": "drone",
+            "frames": 305,
+            "bird": 0,
+            "drone": 305
+          },
+          {
+            "video": "DRONE_044154",
+            "class": "drone",
+            "frames": 312,
+            "bird": 0,
+            "drone": 312
+          },
+          {
+            "video": "DRONE_048158",
+            "class": "drone",
+            "frames": 154,
+            "bird": 0,
+            "drone": 154
+          },
+          {
+            "video": "DRONE_049159",
+            "class": "drone",
+            "frames": 100,
+            "bird": 0,
+            "drone": 100
+          },
+          {
+            "video": "DRONE_051161",
+            "class": "drone",
+            "frames": 309,
+            "bird": 0,
+            "drone": 309
+          },
+          {
+            "video": "DRONE_060170",
+            "class": "drone",
+            "frames": 308,
+            "bird": 0,
+            "drone": 308
+          },
+          {
+            "video": "DRONE_065175",
+            "class": "drone",
+            "frames": 321,
+            "bird": 0,
+            "drone": 321
+          },
+          {
+            "video": "DRONE_067177",
+            "class": "drone",
+            "frames": 325,
+            "bird": 0,
+            "drone": 325
+          },
+          {
+            "video": "DRONE_068178",
+            "class": "drone",
+            "frames": 311,
+            "bird": 0,
+            "drone": 311
+          },
+          {
+            "video": "DRONE_072182",
+            "class": "drone",
+            "frames": 311,
+            "bird": 0,
+            "drone": 311
+          },
+          {
+            "video": "DRONE_075185",
+            "class": "drone",
+            "frames": 315,
+            "bird": 0,
+            "drone": 315
+          }
+        ],
+        "test": [
+          {
+            "video": "BIRD_03897",
+            "class": "bird",
+            "frames": 289,
+            "bird": 368,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_041100",
+            "class": "bird",
+            "frames": 267,
+            "bird": 442,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_042101",
+            "class": "bird",
+            "frames": 265,
+            "bird": 265,
+            "drone": 0
+          },
+          {
+            "video": "BIRD_044103",
+            "class": "bird",
+            "frames": 283,
+            "bird": 283,
+            "drone": 0
+          },
+          {
+            "video": "DRONE_083193",
+            "class": "drone",
+            "frames": 248,
+            "bird": 0,
+            "drone": 248
+          },
+          {
+            "video": "DRONE_085195",
+            "class": "drone",
+            "frames": 277,
+            "bird": 0,
+            "drone": 277
+          },
+          {
+            "video": "DRONE_086196",
+            "class": "drone",
+            "frames": 273,
+            "bird": 0,
+            "drone": 273
+          },
+          {
+            "video": "DRONE_087197",
+            "class": "drone",
+            "frames": 266,
+            "bird": 0,
+            "drone": 266
+          },
+          {
+            "video": "DRONE_088198",
+            "class": "drone",
+            "frames": 232,
+            "bird": 0,
+            "drone": 232
+          },
+          {
+            "video": "DRONE_089199",
+            "class": "drone",
+            "frames": 198,
+            "bird": 0,
+            "drone": 198
+          },
+          {
+            "video": "DRONE_094204",
+            "class": "drone",
+            "frames": 188,
+            "bird": 0,
+            "drone": 188
+          },
+          {
+            "video": "DRONE_095205",
+            "class": "drone",
+            "frames": 261,
+            "bird": 0,
+            "drone": 261
+          },
+          {
+            "video": "DRONE_096206",
+            "class": "drone",
+            "frames": 203,
+            "bird": 0,
+            "drone": 203
+          }
+        ]
+      },
+      "counts": {
+        "train": {
+          "videos": 82,
+          "frames": 23054,
+          "bird": 11413,
+          "drone": 14655,
+          "classes": {
+            "bird": 28,
+            "drone": 54,
+            "mixed": 0
+          }
+        },
+        "val": {
+          "videos": 20,
+          "frames": 5736,
+          "bird": 2700,
+          "drone": 3680,
+          "classes": {
+            "bird": 7,
+            "drone": 13,
+            "mixed": 0
+          }
+        },
+        "test": {
+          "videos": 13,
+          "frames": 3250,
+          "bird": 1358,
+          "drone": 2146,
+          "classes": {
+            "bird": 4,
+            "drone": 9,
+            "mixed": 0
+          }
+        },
+        "total": {
+          "videos": 115,
+          "frames": 32040,
+          "bird": 15471,
+          "drone": 20481,
+          "classes": {
+            "bird": 39,
+            "drone": 76,
+            "mixed": 0
+          }
+        }
+      }
+    },
+    "mendeley": {
+      "root": "/3250410011/root/rivermind-data/mendeley_split",
+      "modality": [
+        "rgb",
+        "ir"
+      ],
+      "alignment": "aligned",
+      "label_space": {
+        "0": "UAV -> remap to 1 (drone)"
+      },
+      "counts": {
+        "train": {
+          "frames": 4604,
+          "objects": 4009,
+          "background": 629,
+          "synthetic": 935
+        },
+        "val": {
+          "frames": 616,
+          "objects": 531,
+          "background": 88,
+          "synthetic": 113
+        },
+        "test": {
+          "frames": 614,
+          "objects": 552,
+          "background": 66,
+          "synthetic": 118
+        }
+      },
+      "note": "labels_ir 与 labels 逐框相同；与 AVID 的弱对齐性质不同，混训前 AVID IR 必须离线配准"
+    }
+  },
+  "training_plan": {
+    "nc": 2,
+    "names": {
+      "0": "bird",
+      "1": "drone"
+    },
+    "train": "avid.train + mendeley.train",
+    "val": "avid.val + mendeley.val",
+    "test_guardrail": "mendeley.test",
+    "test_external": "avid.test (official val)"
+  }
+}

@@ -1,0 +1,35 @@
+# YOLOMM task=depth 数据配置
+#
+# 任务是 RGB+X → 米制深度。X 不限热红外或深度，检测任务能用的副模态这里都能用：
+# thermal / ir / nir / depth / lidar / sar ...
+#
+# 需要分清的是目录，不是模态种类：
+#   images/            RGB
+#   images_<x>/        副模态输入（X）
+#   gt_depth/          米制监督 GT（uint16 PNG / float npy）
+#   预测结果            写到 runs/，不要写回 X 目录
+#
+# 示例（改键名和目录即可换 X）：
+#   modality: {rgb: images, thermal: images_thermal}
+#   modality: {rgb: images, ir: images_ir}
+#   modality: {rgb: images, depth: images_depth}   # X 也是深度图时：输入和 GT 必须是两套文件
+#
+# 禁止：gt_depth 指向 labels/、depth/、images_depth/、images/
+# 禁止：modality.depth: depth（这是官方 GT 目录名）；X 若叫 depth，目录写成 images_depth/
+# 禁止：DepthGen 伪彩/8-bit 当 GT
+
+path: /path/to/your/depthmm
+train: images/train
+val: images/val
+gt_depth: gt_depth
+modality:
+  rgb: images
+  thermal: images_thermal
+modality_used: ["rgb", "thermal"]
+Xch: 3
+nc: 1
+names:
+  0: depth
+min_depth: 0.001
+max_depth: 100
+depth_scale: 1000

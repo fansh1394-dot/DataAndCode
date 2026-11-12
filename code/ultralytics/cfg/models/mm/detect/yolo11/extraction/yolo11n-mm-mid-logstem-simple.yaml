@@ -1,0 +1,12 @@
+# Test: LoGStem2x as first layer only
+nc: 80
+scales:
+  n: [0.50, 0.25, 1024]
+
+backbone:
+  - [-1, 1, LoGStem2x, [64], 'RGB']   # 0
+  - [-1, 2, C3k2, [256, False, 0.25]]     # 1
+  - [-1, 1, Conv, [256, 3, 2]]            # 2
+
+head:
+  - [[2], 1, Detect, [nc]]

@@ -1,0 +1,38 @@
+{
+  "train": {
+    "avid_frames": 23054,
+    "mendeley_frames": 4604,
+    "images": 27658,
+    "images_ir": 27658,
+    "labels": 27658,
+    "labels_ir": 27658,
+    "class_counts": {
+      "1": 18663,
+      "0": 11413
+    }
+  },
+  "val": {
+    "avid_frames": 5736,
+    "mendeley_frames": 616,
+    "images": 6352,
+    "images_ir": 6352,
+    "labels": 6352,
+    "labels_ir": 6352,
+    "class_counts": {
+      "0": 2700,
+      "1": 4211
+    }
+  },
+  "test": {
+    "avid_frames": 3250,
+    "mendeley_frames": 614,
+    "images": 3864,
+    "images_ir": 3864,
+    "labels": 3864,
+    "labels_ir": 3864,
+    "class_counts": {
+      "0": 1358,
+      "1": 2698
+    }
+  }
+}

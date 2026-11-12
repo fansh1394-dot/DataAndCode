@@ -1,0 +1,28 @@
+{
+  "schema": "ppt-master.source_to_md.profile.v1",
+  "converter": "doc_to_md.py",
+  "conversion_type": "docx",
+  "source": {
+    "path": "双光谱反无人机检测_小论文选题与实施规划.docx",
+    "name": "双光谱反无人机检测_小论文选题与实施规划.docx",
+    "suffix": ".docx",
+    "kind": "file",
+    "exists": true,
+    "size_bytes": 83435
+  },
+  "outputs": {
+    "markdown": "双光谱反无人机检测_小论文选题与实施规划.md",
+    "asset_dir": "",
+    "image_manifest": "",
+    "image_count": 0
+  },
+  "markdown": {
+    "line_count": 709,
+    "char_count": 34296,
+    "heading_count": 77,
+    "table_count": 30,
+    "image_ref_count": 0,
+    "link_count": 0
+  },
+  "warnings": []
+}

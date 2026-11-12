@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>双光谱无人机检测 · 实验总览看板</title>
+<style>
+  :root{
+    --bg:#f5f6f8;
+    --card:#ffffff;
+    --ink:#1a1d21;
+    --ink-2:#4a5058;
+    --ink-3:#858c96;
+    --line:#e3e6ea;
+    --done:#1a7f4b;
+    --done-bg:#e8f5ee;
+    --run:#b06d00;
+    --run-bg:#fdf3e2;
+    --todo:#5b6472;
+    --todo-bg:#eef0f3;
+    --block:#b3261e;
+    --block-bg:#fdecea;
+    --accent:#1f4e79;
+    --accent-bg:#eaf1f8;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;padding:40px 32px 72px;
+    background:var(--bg);color:var(--ink);
+    font-family:"Noto Sans CJK SC","WenQuanYi Micro Hei","Microsoft YaHei",-apple-system,sans-serif;
+    font-size:14px;line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;}
+
+  header{margin-bottom:28px;}
+  h1{font-size:26px;margin:0 0 6px;letter-spacing:-0.3px;font-weight:700;}
+  .sub{color:var(--ink-3);font-size:13px;}
+
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:24px 0 36px;}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;}
+  .stat .n{font-size:28px;font-weight:700;line-height:1.15;letter-spacing:-0.5px;}
+  .stat .l{font-size:12px;color:var(--ink-3);margin-top:3px;}
+  .stat.done .n{color:var(--done);}
+  .stat.run  .n{color:var(--run);}
+  .stat.block .n{color:var(--block);}
+
+  section{margin-bottom:36px;}
+  h2{
+    font-size:17px;font-weight:700;margin:0 0 4px;
+    padding-left:11px;border-left:4px solid var(--accent);
+    line-height:1.3;
+  }
+  .hint{color:var(--ink-3);font-size:12.5px;margin:0 0 14px 15px;}
+
+  table{
+    width:100%;border-collapse:separate;border-spacing:0;
+    background:var(--card);border:1px solid var(--line);
+    border-radius:10px;overflow:hidden;font-size:13px;
+  }
+  th{
+    background:#f0f2f5;text-align:left;font-weight:600;color:var(--ink-2);
+    padding:9px 13px;font-size:12px;letter-spacing:0.3px;
+    border-bottom:1px solid var(--line);white-space:nowrap;
+  }
+  td{padding:9px 13px;border-bottom:1px solid #f0f2f5;vertical-align:top;}
+  tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:#fafbfc;}
+
+  code{
+    font-family:"Cascadia Mono",Consolas,monospace;
+    background:#f0f2f5;padding:1px 5px;border-radius:4px;
+    font-size:12px;color:#2d3748;
+  }
+  .tag{
+    display:inline-block;padding:2px 9px;border-radius:20px;
+    font-size:11.5px;font-weight:600;white-space:nowrap;line-height:1.6;
+  }
+  .t-done{background:var(--done-bg);color:var(--done);}
+  .t-run {background:var(--run-bg); color:var(--run);}
+  .t-todo{background:var(--todo-bg);color:var(--todo);}
+  .t-block{background:var(--block-bg);color:var(--block);}
+
+  .pri{font-weight:700;font-size:12px;letter-spacing:-0.5px;}
+  .p3{color:#c0392b;}
+  .p2{color:#b06d00;}
+  .p1{color:var(--ink-3);}
+
+  .callout{
+    border-radius:10px;padding:15px 18px;margin:16px 0;
+    border:1px solid;font-size:13px;
+  }
+  .c-warn{background:var(--block-bg);border-color:#f5c6c2;}
+  .c-note{background:var(--accent-bg);border-color:#c8dcef;}
+  .c-warn strong,.c-note strong{display:block;margin-bottom:5px;font-size:13.5px;}
+  .c-warn strong{color:var(--block);}
+  .c-note strong{color:var(--accent);}
+  .callout ul{margin:6px 0 0;padding-left:20px;}
+  .callout li{margin:3px 0;}
+
+  pre{
+    background:#1f2430;color:#d8dee9;border-radius:8px;
+    padding:13px 16px;overflow-x:auto;font-size:12px;line-height:1.6;
+    font-family:"Cascadia Mono",Consolas,monospace;margin:10px 0;
+  }
+  pre .c{color:#6b7a8f;}
+
+  footer{
+    margin-top:44px;padding-top:18px;border-top:1px solid var(--line);
+    color:var(--ink-3);font-size:12px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>双光谱无人机检测 · 实验总览看板</h1>
+  <div class="sub">2026-09-28 ｜ 主干 YOLO11n ｜ 部署目标 RK3588（6 TOPS NPU, INT8）｜ 目标 SCI 二区</div>
+</header>
+
+<div class="stats">
+  <div class="stat"><div class="n">29</div><div class="l">实验总数（不含 B1 链 4 阶段）</div></div>
+  <div class="stat done"><div class="n">3</div><div class="l">已完成</div></div>
+  <div class="stat run"><div class="n">1</div><div class="l">进行中</div></div>
+  <div class="stat block"><div class="n">2</div><div class="l">受阻（数据缺口）</div></div>
+</div>
+
+<!-- ============ 主线一 ============ -->
+<section>
+  <h2>主线一 · B1 专项链（当前焦点）</h2>
+  <p class="hint">融合头双坐标系监督：给融合分支增设 <code>fuse_ir</code> 头，用 IR 坐标系标签监督，解决「仅红外可见时融合头失效」问题。</p>
+
+  <table>
+    <thead>
+      <tr><th style="width:78px">阶段</th><th>内容</th><th style="width:112px">状态</th><th>通过判据</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>B1-0</strong></td>
+        <td>仅加开关与配置骨架，<code>fuse_ir=None</code></td>
+        <td><span class="tag t-done">已完成</span></td>
+        <td>回归 31/31；三路 mAP 与 <code>best.pt</code> 逐位一致</td>
+      </tr>
+      <tr>
+        <td><strong>B1-1</strong></td>
+        <td><code>fuse_ir</code> 头 + L2 监督（不加 L3）</td>
+        <td><span class="tag t-run">已训·待评测</span></td>
+        <td>困难子集 A 组 fuse <strong>&gt; 0.1</strong>（基线 0.0011）</td>
+      </tr>
+      <tr>
+        <td><strong>B1-2</strong></td>
+        <td>开启 L3-b 跨头一致性约束</td>
+        <td><span class="tag t-run">在跑·参数不符</span></td>
+        <td>A 组 fuse 进一步提升；主集 fuse mAP50-95 ≥ 0.69</td>
+      </tr>
+      <tr>
+        <td><strong>B1-3</strong></td>
+        <td>消融 <code>ir_consist_weight ∈ {0, 0.05, 0.1, 0.5}</code></td>
+        <td><span class="tag t-todo">待做</span></td>
+        <td>找到最优权重区间</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout c-warn">
+    <strong>⚠ 当前运行参数与阶段定义不符</strong>
+    服务器上正在跑的是：
+    <pre>python train_full.py --config dual-fusion-b1 \
+  --mm-modal-dropout 0.3 --epochs 100 --batch 64 \
+  --name abl_B1-2_modal_dropout</pre>
+    其中 <code>--mm-modal-dropout 0.3</code> 是<strong>数据侧 S2 增广</strong>（随机擦除单模态区域），
+    而文档定义的 B1-2 是<strong>损失侧 L3-b 一致性</strong>（<code>--mm-dual-w-fuse-ir-consist 0.1</code>）。
+    <ul>
+      <li>该 run 实质是「B1-1 + S2 增广」，建议改名为 <code>abl_B1-1b_modal_dropout</code>；</li>
+      <li>否则无法区分增益来自 dropout 增广还是 L3-b（因为 L3-b 根本没开），论文归因会串；</li>
+      <li>真正的 B1-2 需补跑：<code>--mm-dual-w-fuse-ir 1.0 --mm-dual-w-fuse-ir-consist 0.1</code>。</li>
+    </ul>
+  </div>
+
+  <div class="callout c-note">
+    <strong>最紧急的一步：先评测 B1-1</strong>
+    成本几分钟，却决定整条链走向——若 A 组 fuse 已 &gt; 0.1，说明监督层面就是主因，可直接推进 B1-2；
+    若仍接近 0，说明问题比监督更深（需结构改造），应及时止损转向 S1 数据配套。建议在 B1-2 训练期间并行执行：
+    <pre>python scripts/eval_hard_subset.py \
+  --weights ResTest/abl_B1-1_dual_ir_head/weights/best.pt \
+  --data /root/rivermind-data/uav_hard/data.yaml \
+  --imgsz 640 --batch 48 --device 0 --groups</pre>
+  </div>
+</section>
+
+<!-- ============ 主线二 ============ -->
+<section>
+  <h2>主线二 · 消融实验 20 组（论文骨架）</h2>
+  <p class="hint">回答「我的设计有没有用」。约 600 GPU·h（4090）。</p>
+
+  <table>
+    <thead>
+      <tr><th style="width:72px">组别</th><th style="width:230px">内容</th><th style="width:56px">数量</th><th style="width:70px">优先级</th><th>状态与命令</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>A0</strong><br><span style="font-size:11px;color:#858c96">架构</span></td>
+        <td>A0-1 <code>late-ref</code> 单头对照<br>A0-2 <code>dual-fusion</code>（DFSC 开）<br>A0-3 关 DFSC</td>
+        <td>3</td>
+        <td class="pri p3">★★★</td>
+        <td>A0-2 <span class="tag t-done">已完成</span><br>A0-1 / A0-3 <span class="tag t-todo">待做</span><br><span style="color:#858c96;font-size:12px">A0-3 建议跳过，可作并行对照</span></td>
+      </tr>
+      <tr>
+        <td><strong>A</strong><br><span style="font-size:11px;color:#858c96">模态</span></td>
+        <td>A1 仅 RGB<br>A2 仅红外（<code>--single-modal x</code>）<br>A3 双模态</td>
+        <td>3</td>
+        <td class="pri p3">★★★</td>
+        <td><span class="tag t-todo">待做</span><br><span style="color:#b3261e;font-size:12px">A2 必须 <code>--label-from ir</code>，否则继承 3.62pp 偏移</span></td>
+      </tr>
+      <tr>
+        <td><strong>B</strong><br><span style="font-size:11px;color:#858c96">融合策略</span></td>
+        <td><code>early</code> / <code>baseline</code> / <code>late-ref</code> / <code>asymmetric</code> / residual / <code>dual-fusion</code></td>
+        <td>6</td>
+        <td class="pri p3">★★★</td>
+        <td><span class="tag t-todo">待做</span><br><span style="color:#858c96;font-size:12px">B6 与 A0-2 共用一次训练</span></td>
+      </tr>
+      <tr>
+        <td><strong>B6</strong><br><span style="font-size:11px;color:#858c96">DFSC 专项</span></td>
+        <td>DFSC 权重 0.0 / 0.25 / 0.5 / 1.0</td>
+        <td>4</td>
+        <td class="pri p3">★★★</td>
+        <td><span class="tag t-todo">待做</span><br><span style="color:#858c96;font-size:12px">B6-a 等价 A0-3，可复用</span></td>
+      </tr>
+      <tr>
+        <td><strong>C</strong><br><span style="font-size:11px;color:#858c96">模块</span></td>
+        <td>C1 <code>baseline</code>（C2PSA）<br>C2 <code>pki</code><br>C3 <code>c3k2-pki</code></td>
+        <td>3</td>
+        <td class="pri p3">★★★</td>
+        <td><span class="tag t-todo">待做</span><br><span style="color:#b3261e;font-size:12px">核心创新点；C1 只能随机初始化，须最先跑</span></td>
+      </tr>
+      <tr>
+        <td><strong>D</strong><br><span style="font-size:11px;color:#858c96">小目标</span></td>
+        <td>D1 <code>baseline</code> / D2 <code>mid-p2</code>（P2 高分辨率头）</td>
+        <td>2</td>
+        <td class="pri p2">★★</td>
+        <td><span class="tag t-todo">待做</span><br><span style="color:#858c96;font-size:12px">目标中位仅 37×34 px</span></td>
+      </tr>
+      <tr>
+        <td><strong>E</strong><br><span style="font-size:11px;color:#858c96">对照</span></td>
+        <td>YOLOv8n / YOLOv10n / RT-DETR-r18<br>CFT / GAFF / ICAFusion / CMX</td>
+        <td>3+</td>
+        <td class="pri p2">★★</td>
+        <td><span class="tag t-todo">待做</span><br><span style="color:#858c96;font-size:12px">引用他人数值须注明数据集不同</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout c-note">
+    <strong>两个锚点必须先跑</strong>
+    <strong>A0-1</strong>（单头 <code>late-ref</code>）是「双头优于单头」的唯一对照；<strong>C1</strong>（纯 <code>baseline</code>）是全部改进的参照基准，
+    且只能随机初始化——顺序反了会让其它实验无法用它的权重加速。
+  </div>
+</section>
+
+<!-- ============ 主线三 ============ -->
+<section>
+  <h2>主线三 · 泛化与鲁棒性</h2>
+  <p class="hint">回答「能否迁移到新环境 / 恶劣输入下是否可靠」。判据是测试数据是否来自训练分布之外。</p>
+
+  <table>
+    <thead>
+      <tr><th style="width:78px">编号</th><th>内容</th><th style="width:120px">数据</th><th style="width:100px">状态</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>G1</strong></td><td><code>single_rgb</code> → DUT Anti-UAV（跨设备）</td><td>已就绪 10000</td><td><span class="tag t-todo">模型未训</span></td></tr>
+      <tr><td><strong>G2</strong></td><td><code>single_ir</code> → Anti-UAV410（跨数据集）</td><td style="color:#b3261e">未下载</td><td><span class="tag t-block">受阻</span></td></tr>
+      <tr><td><strong>G3</strong></td><td><code>single_ir</code> → SIRST-UAVB</td><td>已就绪 9000</td><td><span class="tag t-todo">模型未训</span></td></tr>
+      <tr><td><strong>G4</strong></td><td><code>single_ir</code> → IRSTD-1k</td><td>已就绪 2002</td><td><span class="tag t-todo">模型未训</span></td></tr>
+      <tr><td><strong>G5</strong></td><td>双模态模型单模态退化推理（<code>rgb_source=None</code>）</td><td style="color:#b3261e">依赖 G2</td><td><span class="tag t-block">受阻</span></td></tr>
+      <tr><td><strong>G5-a/b/c</strong></td><td>增强版：仅IR→<code>ir</code>头 / 仅RGB→<code>rgb</code>头 / 双模→<code>fuse</code>头</td><td>同上</td><td><span class="tag t-todo">可选</span></td></tr>
+      <tr><td><strong>R1</strong></td><td>模态失效/降质（双模·仅RGB·仅IR·RGB降质·IR降质）</td><td>自己 test</td><td><span class="tag t-todo">待做</span></td></tr>
+      <tr><td><strong>R2</strong></td><td>非对齐鲁棒性三层次（主证据 / 附加偏移曲线 / DFSC 贡献）</td><td>自己 test</td><td><span class="tag t-todo">待做</span></td></tr>
+      <tr><td><strong>R3</strong></td><td>尺度分层召回（&lt;32 / 32-64 / &gt;64 px）</td><td>自己 test</td><td><span class="tag t-todo">待做</span></td></tr>
+      <tr><td><strong>真机</strong></td><td>端到端延迟 / FPS≥15 / NPU 利用率 / 功耗 / 72h 稳定性</td><td>自采</td><td><span class="tag t-todo">需硬件</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout c-warn">
+    <strong>⚠ 报数铁律（审稿人必查）</strong>
+    <ul>
+      <li>三路 mAP 键为 <code>metrics/{rgb,ir,fuse}/metrics/mAP50-95(B)</code>，<strong>不可跨模态直接比较</strong>，只能各自与其单模态基线比；</li>
+      <li>报 <code>ir</code> 头<strong>必须声明</strong>它使用 IR 坐标系标签（<code>infrared.json</code>），与 <code>rgb</code>/<code>fuse</code> 不同源；</li>
+      <li>外部单模态数据集<strong>只报有真实输入的那一路</strong>（DUT 报 <code>rgb</code>，红外数据集报 <code>ir</code>），融合头不可报数；</li>
+      <li>论文中写「<strong>本方法不依赖配准</strong>」，不要写「我们解决了配准问题」——前者是设计规避，后者是工程修复，逻辑严谨性会被追问。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 缺口 ============ -->
+<section>
+  <h2>三个硬缺口</h2>
+  <p class="hint">不解决会直接影响可发表的实验范围。</p>
+
+  <table>
+    <thead>
+      <tr><th style="width:190px">缺口</th><th>影响</th><th style="width:250px">应对</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Anti-UAV410 未下载</strong></td>
+        <td>G2 与 G5 全部阻塞；G5 是「融合机制泛化」的核心证据</td>
+        <td>优先从百度网盘下载</td>
+      </tr>
+      <tr>
+        <td><strong>无留出测试数据</strong></td>
+        <td>Anti-UAV300 全部 318 序列（train 160 / val 67 / test 91）已用于训练，覆盖率 100%，无任何未参与训练的测试集</td>
+        <td>以 Anti-UAV410 作独立测试集；论文如实说明划分方式；后续可从 A300 划出独立分片重训</td>
+      </tr>
+      <tr>
+        <td><strong>训练集不含困难帧</strong></td>
+        <td><code>prepare_mm_dataset.py</code> 丢弃了单模态可见帧，B1 的融合头从未在「RGB 失效」样本上训练过，效果有上限</td>
+        <td>S1 扩展数据生成保留困难帧（推荐）＋ S2 模态 dropout 增广（正在做）</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ 顺序 ============ -->
+<section>
+  <h2>建议执行顺序</h2>
+  <p class="hint">原则：先验证最不确定的假设，先跑复用度最高的模型。</p>
+
+  <table>
+    <thead>
+      <tr><th style="width:56px">顺序</th><th>内容</th><th style="width:150px">依赖</th><th style="width:96px">预计</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>0</strong></td><td>评测 B1-1 困难子集 <span class="tag t-run">立即</span></td><td>已有权重</td><td>数分钟</td></tr>
+      <tr><td><strong>1</strong></td><td>B1-2（补真正的 L3-b）＋ B1-3 权重消融</td><td>0</td><td>90-120 h</td></tr>
+      <tr><td><strong>2</strong></td><td>A0-1 单头对照 ＋ C1 纯基线（锚点）</td><td>双标签数据集</td><td>60-80 h</td></tr>
+      <tr><td><strong>3</strong></td><td>A1 / A2 模态消融（<strong>同时产出 G1-G4 所需单模态模型</strong>）</td><td>2</td><td>60-80 h</td></tr>
+      <tr><td><strong>4</strong></td><td>C2 / C3 模块消融（可用 C1 权重初始化）</td><td>2</td><td>50-60 h</td></tr>
+      <tr><td><strong>5</strong></td><td>B 组融合策略 ＋ B6 DFSC 权重专项</td><td>2</td><td>120-170 h</td></tr>
+      <tr><td><strong>6</strong></td><td>D 组小目标 ＋ R1/R2/R3 鲁棒性</td><td>2,3,5</td><td>30-60 h</td></tr>
+      <tr><td><strong>7</strong></td><td>G1-G5 泛化（需外部数据）＋ E 组对照 ＋ 真机</td><td>3 ＋ Anti-UAV410</td><td>视情况</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout c-note">
+    <strong>复用度最高的模型（训练一次服务多组实验）</strong>
+    <ul>
+      <li><code>dual-fusion</code> —— 同时是 A0-2、B6、R2 主证据、G5 增强版，<strong>优先级最高</strong>；</li>
+      <li><code>single_rgb</code> / <code>single_ir</code> —— 同时服务 A 组模态消融与 G1-G4 泛化（<code>single_ir</code> 必须用 <code>labels_ir/</code>）；</li>
+      <li><code>baseline</code> —— 所有实验的公共参照，最先训。</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  依据文档：《消融实验清单.md》《泛化性与鲁棒性实验设计.md》《B1改造方案·融合头双坐标系监督.md》《B1-1运行说明.md》《困难子集评估报告·融合鲁棒性分析.md》<br>
+  每完成一组实验，请回填 <code>ResTest/&lt;name&gt;/args.yaml</code>（该文件即天然的实验记录）。
+</footer>
+
+</div>
+</body>
+</html>

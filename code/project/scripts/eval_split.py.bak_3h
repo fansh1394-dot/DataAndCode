@@ -1,0 +1,231 @@
+# -*- coding: utf-8 -*-
+"""在任意 split（val/test）上做 eval-only 正式评测，复用训练期同一套验证器与数据管线。
+
+为什么需要它
+------------
+训练收尾的 final_validation 只评 data.yaml 的 ``val`` 键（模型选择集）。项目硬约束要求
+「域内正式评测」落在完全未参与训练的 test 集（16917 帧），因此需要一个能在任意 split 上
+重跑的独立入口，且与训练期指标严格同口径（同一验证器、同一数据集构建路径、同一标签映射）。
+
+做法
+----
+不改动 data.yaml（避免污染其它实验），而是生成一份派生 yaml：把 ``val:`` 指向目标 split，
+并按 ``--labels-mode`` 重写 ``labels:`` 映射：
+
+    vis  -> {rgb: labels,    ir: labels}       （RGB 坐标系监督，E1）
+    ir   -> {rgb: labels_ir, ir: labels_ir}    （IR  坐标系监督，E3 / A2 / G2-G4）
+    dual -> {rgb: labels,    ir: labels_ir}    （双坐标并存，C4；E2 用 vis 即 IR 图+RGB 标签）
+
+验证器类别按模型末层自动选择，与 ``MultiModalDetectionTrainer.get_validator()`` 保持一致：
+末层为 ``DualHeadFusionDetect`` -> ``DualHeadDetectionValidator``，否则 ``MultiModalDetectionValidator``。
+
+数据契约（由 E3 训练日志核实）
+------------------------------
+模型为 6ch（``Layer 0 <- SECONDARY(ir)模态输入``，单模态 x 只在构建期重定向第 0 层输入），
+数据集 ``img_path = <root>/images/<split>``、x 模态目录来自 ``modality`` 映射（``images_ir``）、
+主标签目录由 ``labels`` 映射的 ``rgb`` 项决定。因此派生 yaml 只需改 ``val`` 与 ``labels``。
+
+用法
+----
+    python scripts/eval_split.py \
+        --weights ResTest/v2_E3_ironly_lblir_s0/weights/best.pt \
+        --split test --labels-mode ir --tag v2_E3_test
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+
+LABELS_MODES = {
+    "vis": {"rgb": "labels", "ir": "labels"},
+    "ir": {"rgb": "labels_ir", "ir": "labels_ir"},
+    "dual": {"rgb": "labels", "ir": "labels_ir"},
+}
+
+# 单模态验证器只把 primary 模态的标签目录用作检测 GT，因此 labels 映射本身
+# 不足以表达 dual 口径。这里显式指定参与计分的标签集：
+#   vis / ir -> primary（数据层已把 labels.rgb 指到目标目录）
+#   dual     -> secondary（按帧使用 bboxes_ir/cls_ir/batch_idx_ir）
+GT_LABEL_SOURCE = {"vis": "primary", "ir": "primary", "dual": "secondary"}
+
+
+def build_derived_yaml(src: Path, out: Path, split: str, labels: dict,
+                       val_list: str | None = None) -> Path:
+    """复制 data.yaml 并把 ``val`` 指向目标 split、重写 ``labels`` 映射。"""
+    import yaml
+
+    cfg = yaml.safe_load(Path(src).read_text(encoding="utf-8"))
+    # val_list 给定时用图像列表文件（场景子集）替代整目录；否则退回整 split 目录
+    cfg["val"] = val_list or f"images/{split}"
+    cfg["labels"] = dict(labels)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="eval-only：在任意 split 上按指定标签口径评测")
+    ap.add_argument("--weights", required=True, help="待评测权重（如 ResTest/<name>/weights/best.pt）")
+    ap.add_argument("--data", default="/root/rivermind-data/uav_data_v2/data.yaml")
+    ap.add_argument("--split", default="test", choices=["train", "val", "test"])
+    ap.add_argument("--val-list", default=None,
+                    help="用 .txt 图像列表替代整个 split 目录（场景子集评测用；"
+                         "相对 dataset path 的相对路径）")
+    ap.add_argument("--labels-mode", default="dual", choices=sorted(LABELS_MODES))
+    ap.add_argument("--imgsz", type=int, default=640)
+    ap.add_argument("--batch", type=int, default=32)
+    ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--device", default="0")
+    ap.add_argument("--tag", required=True, help="结果目录/文件名标识")
+    ap.add_argument("--out", default=None, help="结果 JSON 路径（默认 ResTest/_test_eval/<tag>.json）")
+    ap.add_argument("--late-route", action="store_true",
+                    help="启用决策级晚融合（帧级路由），双头模型额外输出 metrics/route/*")
+    ap.add_argument("--late-route-tau-low", type=float, default=0.30,
+                    help="RGB 最高置信度低于该值视为该帧沉默")
+    ap.add_argument("--late-route-tau-high", type=float, default=0.50,
+                    help="IR 最高置信度高于该值才允许切到 IR")
+    ap.add_argument("--late-route-conf", type=float, default=0.25,
+                    help="参与路由判据的最低置信度")
+    args = ap.parse_args()
+
+    proj = Path(os.environ.get("MM_PROJ", "/3250410011/root/rivermind-data/MutilModel_3485988898"))
+    sys.path.insert(0, str(proj))
+
+    from ultralytics import YOLOMM
+    from ultralytics.models.yolo.multimodal.val import MultiModalDetectionValidator
+    from ultralytics.nn.mm.dual_head import DualHeadFusionDetect
+    from ultralytics.nn.mm.dual_head_v26 import DualHeadFusionDetectV26
+    from ultralytics.nn.mm.dual_val import DualHeadDetectionValidator
+
+    derived = build_derived_yaml(
+        Path(args.data),
+        proj / "_d2p1" / "eval_yamls" / f"data_{args.split}_{args.labels_mode}.yaml",
+        args.split,
+        LABELS_MODES[args.labels_mode],
+        val_list=args.val_list,
+    )
+    print(f"[eval_split] 派生 yaml: {derived} "
+          f"(val={args.val_list or 'images/' + args.split}, labels={LABELS_MODES[args.labels_mode]})")
+
+    weights = Path(args.weights)
+    if not weights.is_file():
+        raise FileNotFoundError(weights)
+    model = YOLOMM(str(weights))
+    net = model.model
+    last = net.model[-1] if hasattr(net, "model") else None
+    # 必须同时识别 YOLO11 与 YOLO26 的聚合头：只判 DualHeadFusionDetect 会让
+    # v26 静默退回 MultiModalDetectionValidator —— 该验证器无法处理四路 dict 输出，
+    # 评出的 metrics/mAP50-95(B) 只是单路，且不会产出 metrics/{rgb,ir,fuse,fuse_ir}/*，
+    # 会让后续 σ 与归因全部静默失效。
+    is_dual = isinstance(last, (DualHeadFusionDetect, DualHeadFusionDetectV26))
+    V = DualHeadDetectionValidator if is_dual else MultiModalDetectionValidator
+    print(f"[eval_split] 末层={type(last).__name__} -> 验证器={V.__name__}")
+
+    vargs = {
+        "task": "detect",
+        "mode": "val",
+        "data": str(derived),
+        "split": "val",  # 派生 yaml 的 val 键已指向目标 split，故此处恒为 val
+        "imgsz": args.imgsz,
+        "batch": args.batch,
+        "workers": args.workers,
+        "device": args.device,
+        "conf": 0.001,
+        "iou": 0.7,
+        "max_det": 300,
+        "half": False,
+        "plots": False,
+        "save_json": False,
+        "save_txt": False,
+        "save_conf": False,
+        "verbose": True,
+        # validator 的落盘目录跟随 --out 的父目录：YOLO26 的评测产物不能写进
+        # YOLO11 的 ResTest/_test_eval，否则两代实验的中间产物会混在一起。
+        "project": str(Path(args.out).parent) if args.out else str(proj / "ResTest" / "_test_eval"),
+        "name": args.tag,
+        "late_route": bool(args.late_route),
+        "late_route_tau_low": args.late_route_tau_low,
+        "late_route_tau_high": args.late_route_tau_high,
+        "late_route_conf": args.late_route_conf,
+        # 仅对单模态验证器生效：dual 口径改成按帧计分 IR 标签。
+        # 双头验证器自己按分支选标签，不读该字段。
+        "gt_label_source": GT_LABEL_SOURCE[args.labels_mode],
+    }
+    if is_dual:
+        # DualHeadDetectionValidator 继承的是普通 DetectionValidator，它既不自己建多模态
+        # dataloader（训练期由 trainer 注入 trainer.test_loader），也不兜底 self.data，
+        # 且非训练分支不设 self.stride。因此 standalone 评测必须：
+        #   1) 复用 MultiModalDetectionValidator.build_dataset 建「与训练期同一套」多模态 loader；
+        #   2) 构造时直接注入该 loader，绕过它自己的 get_dataloader（那条路会因 stride=None 崩）；
+        #   3) 自己补齐 data / device。
+        import torch
+        import yaml
+        from ultralytics.data.build import build_dataloader
+        from ultralytics.data.utils import check_det_dataset
+        from ultralytics.models.yolo.multimodal.val import MultiModalDetectionValidator as MMValidator
+
+        raw = yaml.safe_load(derived.read_text(encoding="utf-8"))
+        data = check_det_dataset(str(derived))
+        for k, val in raw.items():
+            data.setdefault(k, val)  # 保住多模态自定义键（modality/modality_used/labels/Xch...）
+
+        builder = MMValidator(args=vargs)
+        builder.data = data
+        builder.stride = int(net.stride.max())
+        dataset = builder.build_dataset(data.get(vargs["split"]), mode="val", batch=args.batch)
+        loader = build_dataloader(dataset, batch=args.batch, workers=args.workers, shuffle=False, rank=-1)
+        print(f"[eval_split] dual loader: split={vargs['split']} path={data.get(vargs['split'])} n={len(dataset)}")
+
+        device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
+        net = net.to(device).float().eval()
+        validator = V(dataloader=loader, args=vargs)
+        validator.data = data
+        validator.device = device
+    else:
+        validator = V(args=vargs)
+
+    ret = validator(model=net)
+
+    metrics: dict = {}
+    if isinstance(ret, dict):
+        for k, val in ret.items():
+            if isinstance(val, (int, float)):
+                metrics[k] = float(val)
+    det_metrics = getattr(validator, "metrics", None)
+    if det_metrics is not None:
+        for k, val in (getattr(det_metrics, "results_dict", {}) or {}).items():
+            if isinstance(val, (int, float)):
+                metrics.setdefault(k, float(val))
+
+    out = Path(args.out) if args.out else (proj / "ResTest" / "_test_eval" / f"{args.tag}.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "tag": args.tag,
+        "weights": str(weights),
+        "split": args.split,
+        "labels_mode": args.labels_mode,
+        "derived_yaml": str(derived),
+        "is_dual_head": bool(is_dual),
+        "validator": V.__name__,
+        "imgsz": args.imgsz,
+        "batch": args.batch,
+        "late_route": bool(args.late_route),
+        "late_route_thresholds": {
+            "tau_low": args.late_route_tau_low,
+            "tau_high": args.late_route_tau_high,
+            "route_conf": args.late_route_conf,
+        } if args.late_route else None,
+        "metrics": metrics,
+    }
+    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[eval_split] 结果写入 {out}")
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

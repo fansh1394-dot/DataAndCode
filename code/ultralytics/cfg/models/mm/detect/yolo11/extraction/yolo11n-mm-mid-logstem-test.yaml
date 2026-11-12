@@ -1,0 +1,17 @@
+# Test 2: LoGStem2x as first layer + X path
+nc: 80
+scales:
+  n: [0.50, 0.25, 1024]
+
+backbone:
+  - [-1, 1, LoGStem2x, [64], 'RGB']   # 0
+  - [-1, 2, C3k2, [256, False, 0.25]]     # 1
+  - [-1, 1, Conv, [256, 3, 2]]            # 2
+
+  - [-1, 1, Conv, [64, 3, 2], 'X']        # 3
+  - [-1, 1, Conv, [128, 3, 2]]            # 4
+  - [-1, 2, C3k2, [256, False, 0.25]]     # 5
+
+head:
+  - [[2, 5], 1, Concat, [1]]             # 6
+  - [[6], 1, Detect, [nc]]

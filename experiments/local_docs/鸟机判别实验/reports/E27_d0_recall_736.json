@@ -1,0 +1,65 @@
+{
+  "images": 1104,
+  "images_with_pred": 822,
+  "pred_boxes": 1759,
+  "pred_per_image_mean": 1.593,
+  "gt_boxes": 1358,
+  "taus": [
+    0.0,
+    0.01,
+    0.05,
+    0.1,
+    0.25
+  ],
+  "overall": {
+    "n": 1358,
+    "iou0.3_tau0.0": 0.542,
+    "iou0.5_tau0.0": 0.1392,
+    "iou0.3_tau0.01": 0.3792,
+    "iou0.5_tau0.01": 0.0707,
+    "iou0.3_tau0.05": 0.2113,
+    "iou0.5_tau0.05": 0.0309,
+    "iou0.3_tau0.1": 0.1502,
+    "iou0.5_tau0.1": 0.0199,
+    "iou0.3_tau0.25": 0.0648,
+    "iou0.5_tau0.25": 0.0096,
+    "side_median": 12.0,
+    "best_iou_mean": 0.2511,
+    "best_iou_median": 0.3315
+  },
+  "by_bucket": {
+    "16-24": {
+      "n": 1,
+      "iou0.3_tau0.0": 1.0,
+      "iou0.5_tau0.0": 0.0,
+      "iou0.3_tau0.01": 0.0,
+      "iou0.5_tau0.01": 0.0,
+      "iou0.3_tau0.05": 0.0,
+      "iou0.5_tau0.05": 0.0,
+      "iou0.3_tau0.1": 0.0,
+      "iou0.5_tau0.1": 0.0,
+      "iou0.3_tau0.25": 0.0,
+      "iou0.5_tau0.25": 0.0,
+      "side_median": 16.0,
+      "best_iou_mean": 0.3153,
+      "best_iou_median": 0.3153
+    },
+    "8-16": {
+      "n": 1357,
+      "iou0.3_tau0.0": 0.5416,
+      "iou0.5_tau0.0": 0.1393,
+      "iou0.3_tau0.01": 0.3795,
+      "iou0.5_tau0.01": 0.0707,
+      "iou0.3_tau0.05": 0.2115,
+      "iou0.5_tau0.05": 0.031,
+      "iou0.3_tau0.1": 0.1503,
+      "iou0.5_tau0.1": 0.0199,
+      "iou0.3_tau0.25": 0.0648,
+      "iou0.5_tau0.25": 0.0096,
+      "side_median": 12.0,
+      "best_iou_mean": 0.251,
+      "best_iou_median": 0.3315
+    }
+  },
+  "preds_file": "/root/rivermind-fs/birddrone/E27/preds_736.jsonl"
+}

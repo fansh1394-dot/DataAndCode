@@ -1,0 +1,56 @@
+# Ultralytics YOLOMM with DRFD Downsample
+# DRFD: Downsample Residual Fusion with Gaussian - alternative downsampling module
+# DRFD combines Cut (space-to-depth), Conv, and MaxPool with Gaussian filtering
+nc: 80
+scales:
+  n: [0.50, 0.25, 1024]
+  s: [0.50, 0.50, 1024]
+  m: [0.50, 1.00, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.50, 512]
+
+backbone:
+  # RGB路径 - 使用DRFD进行下采样
+  - [-1, 1, Conv, [64, 3, 2], 'RGB']           # P1/2, 64ch
+  - [-1, 1, DRFD, [64, 128]]                     # P2/4, 128ch (DRFD下采样)
+  - [-1, 1, Conv, [256, 3, 2]]                    # P3/8, 256ch
+  - [-1, 1, DRFD, [256, 512]]                    # P4/16, 512ch (DRFD下采样)
+  - [-1, 1, Conv, [512, 3, 2]]                    # P4/16, 512ch
+  - [-1, 1, C3k2, [512, True]]                   # P4/16, 512ch (C3k2)
+  - [-1, 1, Conv, [1024, 3, 2]]                   # P5/32, 1024ch
+  - [-1, 1, C3k2, [1024, True]]                  # P5/32, 1024ch
+  - [-1, 1, SPPF, [1024, 5]]                     # P5/32, 1024ch
+  - [-1, 1, C2PSA, [1024]]                        # P5/32, 1024ch
+
+  # X路径 - 标准Conv下采样
+  - [-1, 1, Conv, [64, 3, 2], 'X']              # P1/2, 64ch
+  - [-1, 1, Conv, [128, 3, 2]]                    # P2/4, 128ch
+  - [-1, 1, Conv, [256, 3, 2]]                    # P3/8, 256ch
+  - [-1, 1, Conv, [512, 3, 2]]                    # P4/16, 512ch
+  - [-1, 1, C3k2, [512, True]]                    # P4/16, 512ch
+  - [-1, 1, Conv, [1024, 3, 2]]                   # P5/32, 1024ch
+  - [-1, 1, C3k2, [1024, True]]                   # P5/32, 1024ch
+  - [-1, 1, SPPF, [1024, 5]]                      # P5/32, 1024ch
+  - [-1, 1, C2PSA, [1024]]                        # P5/32, 1024ch
+
+  # P4/P5融合
+  - [[5, 13], 1, Concat, [1]]                     # P4融合: RGB(5) + X(13)
+  - [-1, 2, C3k2, [1024, True]]                   # Fused_P4
+  - [[9, 17], 1, Concat, [1]]                     # P5融合: RGB(9) + X(17)
+  - [-1, 2, C3k2, [1024, True]]                   # Fused_P5
+  - [-1, 1, C2PSA, [1024]]                        # Fused_P5
+
+head:
+  - [21, 1, nn.Upsample, [None, 2, "nearest"]]   # Fused_P5上采样
+  - [[-1, 18], 1, Concat, [1]]                    # 连接Fused_P4
+  - [-1, 2, C3k2, [512, False]]                   # P4/16
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]   # P3/8上采样
+  - [[-1, 2], 1, Concat, [1]]                     # 连接RGB_P3(2)
+  - [-1, 2, C3k2, [256, False]]                   # P3/8-small
+  - [-1, 1, Conv, [256, 3, 2]]                    # 下采样
+  - [[-1, 13], 1, Concat, [1]]                    # 连接P4/16
+  - [-1, 2, C3k2, [512, False]]                   # P4/16-medium
+  - [-1, 1, Conv, [512, 3, 2]]                    # 下采样
+  - [[-1, 10], 1, Concat, [1]]                    # 连接P5/32
+  - [-1, 2, C3k2, [1024, True]]                   # P5/32-large
+  - [[24, 27, 30], 1, Detect, [nc]]               # Detect(P3, P4, P5)

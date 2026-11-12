@@ -1,0 +1,142 @@
+{
+  "root": "/root/rivermind-fs/AVID",
+  "issues": [],
+  "checks": {
+    "manifest": {
+      "expected_files": 96166,
+      "local_files": 96166,
+      "cache_files": 0,
+      "expected_bytes": 569540585,
+      "local_bytes": 569540585,
+      "missing": 0,
+      "extra": 0,
+      "size_mismatch": 0
+    },
+    "structure": {
+      "videos_train": 102,
+      "videos_val": 13,
+      "videos_total": 115
+    },
+    "labels": {
+      "label_files": 32040,
+      "empty_label_files": 0,
+      "frames_with_boxes": 32040,
+      "frames_with_both_classes": 0,
+      "boxes_total": 35952,
+      "bird": 15471,
+      "drone": 20481,
+      "by_split": {
+        "train": {
+          "drone": 18335,
+          "bird": 14113
+        },
+        "val": {
+          "drone": 2146,
+          "bird": 1358
+        }
+      },
+      "bad_lines": 0,
+      "bad_boxes": 0,
+      "bad_class": 0,
+      "duplicate_boxes": 0
+    },
+    "pairing": {
+      "rgb_frames": 32040,
+      "ir_frames": 32040,
+      "label_frames": 32040,
+      "labels_without_rgb": 0,
+      "labels_without_ir": 0,
+      "rgb_without_label": 0,
+      "rgb_without_ir": 0,
+      "ir_without_rgb": 0
+    },
+    "images": {
+      "images_total": 64080,
+      "sizes": {
+        "320x256": 64080
+      },
+      "corrupt": 0
+    },
+    "box_size": {
+      "n": 35952,
+      "buckets": {
+        "<8": 103,
+        "8-16": 24489,
+        "16-24": 9424,
+        "24-32": 1565,
+        "32-48": 371,
+        ">=48": 0
+      },
+      "pct": {
+        "<8": 0.29,
+        "8-16": 68.12,
+        "16-24": 26.21,
+        "24-32": 4.35,
+        "32-48": 1.03,
+        ">=48": 0.0
+      },
+      "coco_small_lt32": 98.97,
+      "median_side_px": 14.0,
+      "mean_side_px": 15.26
+    },
+    "videos": {
+      "train": 102,
+      "val": 13,
+      "per_video_top": [
+        {
+          "video": "train",
+          "frames": 28790,
+          "boxes": 32448,
+          "bird": 14113,
+          "drone": 18335
+        },
+        {
+          "video": "val",
+          "frames": 3250,
+          "boxes": 3504,
+          "bird": 1358,
+          "drone": 2146
+        }
+      ]
+    }
+  },
+  "compare_paper": {
+    "pairs": {
+      "paper": 32040,
+      "actual": 32040,
+      "delta": 0
+    },
+    "videos": {
+      "paper": 115,
+      "actual": 115,
+      "delta": 0
+    },
+    "boxes": {
+      "paper": 35952,
+      "actual": 35952,
+      "delta": 0
+    },
+    "bird": {
+      "paper": 15471,
+      "actual": 15471,
+      "delta": 0
+    },
+    "drone": {
+      "paper": 20481,
+      "actual": 20481,
+      "delta": 0
+    },
+    "pct_8_16": {
+      "paper": 68.1,
+      "actual": 68.12,
+      "delta": 0.02
+    },
+    "pct_coco_small": {
+      "paper": 99.0,
+      "actual": 98.97,
+      "delta": -0.03
+    }
+  },
+  "verdict": "PASS",
+  "verdict_note": "文件完整、配对齐全、标签格式合法；计数与论文一致（允许四舍五入）"
+}

@@ -1,0 +1,372 @@
+# -*- coding: utf-8 -*-
+"""在任意 split（val/test）上做 eval-only 正式评测，复用训练期同一套验证器与数据管线。
+
+为什么需要它
+------------
+训练收尾的 final_validation 只评 data.yaml 的 ``val`` 键（模型选择集）。项目硬约束要求
+「域内正式评测」落在完全未参与训练的 test 集（16917 帧），因此需要一个能在任意 split 上
+重跑的独立入口，且与训练期指标严格同口径（同一验证器、同一数据集构建路径、同一标签映射）。
+
+做法
+----
+不改动 data.yaml（避免污染其它实验），而是生成一份派生 yaml：把 ``val:`` 指向目标 split，
+并按 ``--labels-mode`` 重写 ``labels:`` 映射：
+
+    vis  -> {rgb: labels,    ir: labels}       （RGB 坐标系监督，E1）
+    ir   -> {rgb: labels_ir, ir: labels_ir}    （IR  坐标系监督，E3 / A2 / G2-G4）
+    dual -> {rgb: labels,    ir: labels_ir}    （双坐标并存，C4；E2 用 vis 即 IR 图+RGB 标签）
+
+验证器类别按模型末层自动选择，与 ``MultiModalDetectionTrainer.get_validator()`` 保持一致：
+末层为 ``DualHeadFusionDetect`` -> ``DualHeadDetectionValidator``，否则 ``MultiModalDetectionValidator``。
+
+数据契约（由 E3 训练日志核实）
+------------------------------
+模型为 6ch（``Layer 0 <- SECONDARY(ir)模态输入``，单模态 x 只在构建期重定向第 0 层输入），
+数据集 ``img_path = <root>/images/<split>``、x 模态目录来自 ``modality`` 映射（``images_ir``）、
+主标签目录由 ``labels`` 映射的 ``rgb`` 项决定。因此派生 yaml 只需改 ``val`` 与 ``labels``。
+
+用法
+----
+    python scripts/eval_split.py \
+        --weights ResTest/v2_E3_ironly_lblir_s0/weights/best.pt \
+        --split test --labels-mode ir --tag v2_E3_test
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+LABELS_MODES = {
+    "vis": {"rgb": "labels", "ir": "labels"},
+    "ir": {"rgb": "labels_ir", "ir": "labels_ir"},
+    "dual": {"rgb": "labels", "ir": "labels_ir"},
+}
+
+# 单模态验证器只把 primary 模态的标签目录用作检测 GT，因此 labels 映射本身
+# 不足以表达 dual 口径。这里显式指定参与计分的标签集：
+#   vis / ir -> primary（数据层已把 labels.rgb 指到目标目录）
+#   dual     -> secondary（按帧使用 bboxes_ir/cls_ir/batch_idx_ir）
+GT_LABEL_SOURCE = {"vis": "primary", "ir": "primary", "dual": "secondary"}
+
+
+def build_derived_yaml(src: Path, out: Path, split: str, labels: dict,
+                       val_list: str | None = None) -> Path:
+    """复制 data.yaml 并把 ``val`` 指向目标 split、重写 ``labels`` 映射。"""
+    import yaml
+
+    cfg = yaml.safe_load(Path(src).read_text(encoding="utf-8"))
+    # val_list 给定时用图像列表文件（场景子集）替代整目录；否则退回整 split 目录
+    cfg["val"] = val_list or f"images/{split}"
+    cfg["labels"] = dict(labels)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="eval-only：在任意 split 上按指定标签口径评测")
+    ap.add_argument("--weights", required=True, help="待评测权重（如 ResTest/<name>/weights/best.pt）")
+    ap.add_argument("--data", default="/root/rivermind-data/uav_data_v2/data.yaml")
+    ap.add_argument("--split", default="test", choices=["train", "val", "test"])
+    ap.add_argument("--val-list", default=None,
+                    help="用 .txt 图像列表替代整个 split 目录（场景子集评测用；"
+                         "相对 dataset path 的相对路径）")
+    ap.add_argument("--labels-mode", default="dual", choices=sorted(LABELS_MODES))
+    ap.add_argument("--imgsz", type=int, default=640)
+    ap.add_argument("--batch", type=int, default=32)
+    ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--device", default="0")
+    ap.add_argument("--tag", required=True, help="结果目录/文件名标识")
+    ap.add_argument("--out", default=None, help="结果 JSON 路径（默认 ResTest/_test_eval/<tag>.json）")
+    ap.add_argument("--late-route", action="store_true",
+                    help="启用决策级晚融合（帧级路由），双头模型额外输出 metrics/route/*")
+    ap.add_argument("--late-route-tau-low", type=float, default=0.30,
+                    help="RGB 最高置信度低于该值视为该帧沉默")
+    ap.add_argument("--late-route-tau-high", type=float, default=0.50,
+                    help="IR 最高置信度高于该值才允许切到 IR")
+    ap.add_argument("--late-route-conf", type=float, default=0.25,
+                    help="参与路由判据的最低置信度")
+    ap.add_argument("--zero-modality", default=None, choices=("rgb", "ir"),
+                    help="把指定模态的输入整体置零（敏感度测试用）。"
+                         "用于回答「融合增益是否真的来自该模态」："
+                         "置零 IR 后 fuse 头若无明显下降，说明 IR 未被使用。")
+    ap.add_argument("--zero-fill", type=float, default=0.0,
+                    help="置零时填入的常数。注意量纲是 uint8(0-255)：0=全黑，"
+                         "128=中灰（用于排除「分布外黑块」而非「信息缺失」的混淆）。")
+    ap.add_argument("--ir-shift", default=None,
+                    help="IR 相对 RGB 的整体平移错位，单位是 640 输入空间像素，"
+                         "格式 \"dx,dy\"（向右/向下为正）。模拟双光谱视差与装配公差。")
+    ap.add_argument("--ir-rotate", type=float, default=0.0,
+                    help="IR 相对 RGB 的整体旋转错位，单位度，绕图像中心（正值按 OpenCV 逆时针）。")
+    ap.add_argument("--dump-preds", default=None,
+                    help="把主分支（fuse）原生尺度预测写成 jsonl（im_file/bboxes/conf/cls），"
+                         "用于提议召回等离线匹配。默认关闭。")
+    args = ap.parse_args()
+
+    proj = Path(os.environ.get("MM_PROJ", "/3250410011/root/rivermind-data/MutilModel_3485988898"))
+    sys.path.insert(0, str(proj))
+
+    from ultralytics import YOLOMM
+    from ultralytics.models.yolo.multimodal.val import MultiModalDetectionValidator
+    from ultralytics.nn.mm.dual_head import DualHeadFusionDetect
+    from ultralytics.nn.mm.dual_head_v26 import DualHeadFusionDetectV26
+    from ultralytics.nn.mm.dual_val import DualHeadDetectionValidator
+
+    derived = build_derived_yaml(
+        Path(args.data),
+        proj / "_d2p1" / "eval_yamls" / f"data_{args.split}_{args.labels_mode}.yaml",
+        args.split,
+        LABELS_MODES[args.labels_mode],
+        val_list=args.val_list,
+    )
+    print(f"[eval_split] 派生 yaml: {derived} "
+          f"(val={args.val_list or 'images/' + args.split}, labels={LABELS_MODES[args.labels_mode]})")
+
+    weights = Path(args.weights)
+    if not weights.is_file():
+        raise FileNotFoundError(weights)
+    model = YOLOMM(str(weights))
+    net = model.model
+    last = net.model[-1] if hasattr(net, "model") else None
+    # 必须同时识别 YOLO11 与 YOLO26 的聚合头：只判 DualHeadFusionDetect 会让
+    # v26 静默退回 MultiModalDetectionValidator —— 该验证器无法处理四路 dict 输出，
+    # 评出的 metrics/mAP50-95(B) 只是单路，且不会产出 metrics/{rgb,ir,fuse,fuse_ir}/*，
+    # 会让后续 σ 与归因全部静默失效。
+    is_dual = isinstance(last, (DualHeadFusionDetect, DualHeadFusionDetectV26))
+    V = DualHeadDetectionValidator if is_dual else MultiModalDetectionValidator
+    print(f"[eval_split] 末层={type(last).__name__} -> 验证器={V.__name__}")
+
+    vargs = {
+        "task": "detect",
+        "mode": "val",
+        "data": str(derived),
+        "split": "val",  # 派生 yaml 的 val 键已指向目标 split，故此处恒为 val
+        "imgsz": args.imgsz,
+        "batch": args.batch,
+        "workers": args.workers,
+        "device": args.device,
+        "conf": 0.001,
+        "iou": 0.7,
+        "max_det": 300,
+        "half": False,
+        "plots": False,
+        "save_json": False,
+        "save_txt": False,
+        "save_conf": False,
+        "verbose": True,
+        # validator 的落盘目录跟随 --out 的父目录：YOLO26 的评测产物不能写进
+        # YOLO11 的 ResTest/_test_eval，否则两代实验的中间产物会混在一起。
+        "project": str(Path(args.out).parent) if args.out else str(proj / "ResTest" / "_test_eval"),
+        "name": args.tag,
+        "late_route": bool(args.late_route),
+        "late_route_tau_low": args.late_route_tau_low,
+        "late_route_tau_high": args.late_route_tau_high,
+        "late_route_conf": args.late_route_conf,
+        # 仅对单模态验证器生效：dual 口径改成按帧计分 IR 标签。
+        # 双头验证器自己按分支选标签，不读该字段。
+        "gt_label_source": GT_LABEL_SOURCE[args.labels_mode],
+    }
+    if is_dual:
+        # DualHeadDetectionValidator 继承的是普通 DetectionValidator，它既不自己建多模态
+        # dataloader（训练期由 trainer 注入 trainer.test_loader），也不兜底 self.data，
+        # 且非训练分支不设 self.stride。因此 standalone 评测必须：
+        #   1) 复用 MultiModalDetectionValidator.build_dataset 建「与训练期同一套」多模态 loader；
+        #   2) 构造时直接注入该 loader，绕过它自己的 get_dataloader（那条路会因 stride=None 崩）；
+        #   3) 自己补齐 data / device。
+        import torch
+        import yaml
+        from ultralytics.data.build import build_dataloader
+        from ultralytics.data.utils import check_det_dataset
+        from ultralytics.models.yolo.multimodal.val import MultiModalDetectionValidator as MMValidator
+
+        raw = yaml.safe_load(derived.read_text(encoding="utf-8"))
+        data = check_det_dataset(str(derived))
+        for k, val in raw.items():
+            data.setdefault(k, val)  # 保住多模态自定义键（modality/modality_used/labels/Xch...）
+
+        builder = MMValidator(args=vargs)
+        builder.data = data
+        builder.stride = int(net.stride.max())
+        dataset = builder.build_dataset(data.get(vargs["split"]), mode="val", batch=args.batch)
+
+        # ===== IR 错位扰动（同样必须在 build_dataloader 之前打补丁）=====
+        # 物理含义：把 IR 半边整体平移/旋转，模拟双光谱相机的视差、装配公差与
+        # 标定残余。平移量以「640 输入空间像素」为单位，再按每帧 letterbox 比例
+        # 换算回原图坐标后 warp，保证换算口径在所有分辨率帧上一致。
+        _dx640, _dy640 = (float(v) for v in (args.ir_shift or "0,0").split(","))
+        _ang = float(args.ir_rotate)
+        if _dx640 or _dy640 or _ang:
+            import types
+
+            import cv2
+            import numpy as np
+
+            _orig_load = dataset.load_multimodal_image
+            _ir0, _ir1 = 3, 6
+            _border = 114
+
+            def _mis_load_mm(self, i, timing_stats=None, **kw):
+                img = _orig_load(i, timing_stats=timing_stats, **kw)
+                if img is None or img.ndim != 3 or img.shape[2] < _ir1:
+                    return img
+                h, w = img.shape[:2]
+                r = min(float(args.imgsz) / h, float(args.imgsz) / w)
+                m = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), _ang, 1.0)
+                m[0, 2] += _dx640 / r
+                m[1, 2] += _dy640 / r
+                out = np.array(img, copy=True)
+                out[:, :, _ir0:_ir1] = cv2.warpAffine(
+                    img[:, :, _ir0:_ir1], m, (w, h),
+                    flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_CONSTANT,
+                    borderValue=(_border,) * 3,
+                )
+                return out
+
+            dataset.load_multimodal_image = types.MethodType(_mis_load_mm, dataset)
+
+            # 自检：RGB 半边必须逐像素不变，IR 半边必须真的变了。
+            probe_a = _orig_load(0)
+            probe_b = dataset.load_multimodal_image(0)
+            assert probe_a is not None and probe_b is not None, "错位自检：取图为空"
+            rgb_delta = float(np.abs(probe_b[:, :, :3].astype(np.int16)
+                                     - probe_a[:, :, :3].astype(np.int16)).max())
+            ir_delta = float(np.abs(probe_b[:, :, _ir0:_ir1].astype(np.int16)
+                                    - probe_a[:, :, _ir0:_ir1].astype(np.int16)).mean())
+            assert rgb_delta == 0, f"错位自检失败：RGB 半边被改动（max|Δ|={rgb_delta}）"
+            assert ir_delta > 0.1, f"错位自检失败：IR 半边几乎没变（mean|Δ|={ir_delta:.3f}）"
+            print(f"[eval_split] IR 错位已启用：shift=({_dx640:.1f},{_dy640:.1f})px@640 "
+                  f"rotate={_ang:.2f}deg（自检通过：RGB max|Δ|=0，IR mean|Δ|={ir_delta:.2f}，"
+                  f"shape={tuple(probe_b.shape)}）")
+
+        # ===== 模态置零（必须在 build_dataloader 之前打补丁）=====
+        # 为什么顺序重要：build_dataloader 一创建就 fork 出 worker 并开始预取，
+        # 之后再改 dataset 已经晚了 —— 前面三版全部栽在这里，指标纹丝不动。
+        #
+        # 为什么拦 load_multimodal_image：
+        #   实际调用链是
+        #     YOLOMultiModalImageDataset.__getitem__ (dataset.py:1122)
+        #       -> self.load_multimodal_image(index)          (1145/1167/1171)
+        #         -> 内部拼出 [RGB, X] 6 通道 ndarray
+        #   _load_multimodal_components 是 Mosaic 供图路径（返回 434x640），
+        #   不是 val 取图路径，所以拦它看不到任何效果。
+        if args.zero_modality:
+            import types
+
+            import numpy as np
+
+            fill = float(args.zero_fill)
+            idx0 = 0 if args.zero_modality == "rgb" else 3
+            idx1 = idx0 + 3
+            assert hasattr(dataset, "load_multimodal_image"), (
+                f"{type(dataset).__name__} 没有 load_multimodal_image，"
+                "置零实现需按该数据集的实际取图路径调整"
+            )
+
+            dataset._orig_load_mm = dataset.load_multimodal_image
+
+            def _zero_load_mm(self, i, timing_stats=None, **kw):
+                img = self.__dict__["_orig_load_mm"](i, timing_stats=timing_stats, **kw)
+                if img is not None and img.ndim == 3 and img.shape[2] >= idx1:
+                    img = img.copy()
+                    img[:, :, idx0:idx1] = fill
+                return img
+
+            dataset.load_multimodal_image = types.MethodType(_zero_load_mm, dataset)
+
+            # 自检：确认目标半边是常数、另一半保留纹理。
+            # 没有这一步就会像前几版一样静默失败，产出 Δ=0 的假结果。
+            probe = dataset.load_multimodal_image(0)
+            assert probe is not None and probe.ndim == 3, "置零自检：取图为空"
+            tgt_side = probe[:, :, idx0:idx1]
+            keep_side = probe[:, :, idx1:idx1 + 3] if idx0 == 0 else probe[:, :, :3]
+            tgt = float(np.asarray(tgt_side, dtype=np.float32).mean())
+            keep = float(np.asarray(keep_side, dtype=np.float32).std())
+            assert abs(tgt - fill) < 1e-3, (
+                f"置零自检失败：目标半边均值={tgt:.4f}，期望 {fill}"
+            )
+            assert keep > 1e-3, "置零自检失败：另一路变成常数，说明改错了分支"
+            print(f"[eval_split] 模态置零已启用：{args.zero_modality} -> {fill}"
+                  f"（自检通过：目标半边均值={tgt:.2f}，另一路 std={keep:.2f}，"
+                  f"shape={tuple(probe.shape)}，共 {len(dataset)} 帧）")
+
+        loader = build_dataloader(dataset, batch=args.batch, workers=args.workers, shuffle=False, rank=-1)
+        print(f"[eval_split] dual loader: split={vargs['split']} path={data.get(vargs['split'])} n={len(dataset)}")
+
+        device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
+        net = net.to(device).float().eval()
+
+        validator = V(dataloader=loader, args=vargs)
+        validator.data = data
+        validator.device = device
+    else:
+        validator = V(args=vargs)
+
+    if args.dump_preds:
+        import types
+
+        dump_path = Path(args.dump_preds)
+        dump_path.parent.mkdir(parents=True, exist_ok=True)
+        dump_path.write_text("", encoding="utf-8")
+
+        def _dump_pred_to_json(self, predn, filename):
+            rec = {
+                "im_file": str(filename),
+                "bboxes": predn["bboxes"].detach().cpu().tolist(),
+                "conf": predn["conf"].detach().cpu().tolist(),
+                "cls": predn["cls"].detach().cpu().tolist(),
+            }
+            with dump_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(rec) + "\n")
+
+        validator.pred_to_json = types.MethodType(_dump_pred_to_json, validator)
+        print(f"[eval_split] 预测转储 -> {dump_path}")
+
+    ret = validator(model=net)
+
+    metrics: dict = {}
+    if isinstance(ret, dict):
+        for k, val in ret.items():
+            if isinstance(val, (int, float)):
+                metrics[k] = float(val)
+    det_metrics = getattr(validator, "metrics", None)
+    if det_metrics is not None:
+        for k, val in (getattr(det_metrics, "results_dict", {}) or {}).items():
+            if isinstance(val, (int, float)):
+                metrics.setdefault(k, float(val))
+
+    out = Path(args.out) if args.out else (proj / "ResTest" / "_test_eval" / f"{args.tag}.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "tag": args.tag,
+        "weights": str(weights),
+        "split": args.split,
+        "labels_mode": args.labels_mode,
+        "derived_yaml": str(derived),
+        "is_dual_head": bool(is_dual),
+        "validator": V.__name__,
+        "imgsz": args.imgsz,
+        "batch": args.batch,
+        "late_route": bool(args.late_route),
+        "zero_modality": args.zero_modality,
+        "zero_fill": float(args.zero_fill) if args.zero_modality else None,
+        "ir_shift": args.ir_shift,
+        "ir_rotate": float(args.ir_rotate),
+        "late_route_thresholds": {
+            "tau_low": args.late_route_tau_low,
+            "tau_high": args.late_route_tau_high,
+            "route_conf": args.late_route_conf,
+        } if args.late_route else None,
+        "metrics": metrics,
+    }
+    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[eval_split] 结果写入 {out}")
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

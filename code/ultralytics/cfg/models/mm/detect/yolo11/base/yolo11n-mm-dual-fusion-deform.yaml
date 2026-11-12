@@ -1,0 +1,86 @@
+# Deformable cross-modal fusion (改动 C4: K 点可变形交叉注意力).
+# 与 yolo11n-mm-dual-fusion-gated.yaml 的唯一架构差异：三个融合节点由
+# GatedReliabilityFusion（单点偏移 grid_sample + 残差门控）换成
+# DeformableCrossModalFusion（每位置预测 K 个采样点 + 内容注意力聚合 + 残差门控），
+# 以突破「单一稠密偏移场 + 双线性重采样」在强视差/独立传感器运动下无法表达的
+# 多假设失配，并避免 2x2 插值抹平小目标高频细节。其余骨干/neck/四个检测头完全一致，
+# 保证只改「融合算子」一个变量，可与 gated / reliable / N0 直接对照。
+#
+# DeformableCrossModalFusion 参数：[ouc, max_offset, num_points, base, attn]
+#   num_points(K): 可变形采样点数，默认 4（deformable-conv-v2 默认）
+#   base: 'rgb'（默认）| 'ir' | 'mean'
+#   attn: 'channel'（默认）| 'pixel'  —— 注意力粒度
+#
+# 安全初始化：offset 头与 attn 头均零初始化，故训练起点为「K 点重合 + 注意力均匀」，
+# 等价于中性均值融合；gate 头用小随机初始化（避免 std 正则的零梯度鞍点，同 P0/L_gate）。
+
+nc: 80
+scales:
+  n: [0.50, 0.25, 1024]
+  s: [0.50, 0.50, 1024]
+  m: [0.50, 1.00, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.50, 512]
+
+backbone:
+  - [-1, 1, Conv, [64, 3, 2], 'RGB']
+  - [-1, 1, Conv, [128, 3, 2]]
+  - [-1, 2, C3k2, [256, False, 0.25]]
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [-1, 2, C3k2, [512, False, 0.25]]
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [-1, 2, C3k2, [512, True]]
+  - [-1, 1, Conv, [1024, 3, 2]]
+  - [-1, 2, C3k2, [1024, True]]
+  - [-1, 1, SPPF, [1024, 5]]
+  - [-1, 2, C2PSA, [1024]]
+  - [-1, 1, Conv, [64, 3, 2], 'X']
+  - [-1, 1, Conv, [128, 3, 2]]
+  - [-1, 2, C3k2, [256, False, 0.25]]
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [-1, 2, C3k2, [512, False, 0.25]]
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [-1, 2, C3k2, [512, True]]
+  - [-1, 1, Conv, [1024, 3, 2]]
+  - [-1, 2, C3k2, [1024, True]]
+  - [-1, 1, SPPF, [1024, 5]]
+  - [-1, 2, C2PSA, [1024]]
+
+head:
+  - [10, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 6], 1, Concat, [1]]
+  - [-1, 2, C3k2, [512, False]]
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 4], 1, Concat, [1]]
+  - [-1, 2, C3k2, [256, False]]
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [[-1, 24], 1, Concat, [1]]
+  - [-1, 2, C3k2, [512, False]]
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [[-1, 10], 1, Concat, [1]]
+  - [-1, 2, C3k2, [1024, True]]
+  - [21, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 17], 1, Concat, [1]]
+  - [-1, 2, C3k2, [512, False]]
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 15], 1, Concat, [1]]
+  - [-1, 2, C3k2, [256, False]]
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [[-1, 36], 1, Concat, [1]]
+  - [-1, 2, C3k2, [512, False]]
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [[-1, 21], 1, Concat, [1]]
+  - [-1, 2, C3k2, [1024, True]]
+  # 三个融合节点：唯一的架构改动（相对 gated 版仅为融合算子替换）
+  # 参数 [ouc, max_offset, num_points(K), base, attn]
+  - [[27, 39], 1, DeformableCrossModalFusion, [256, 0.08, 4]]
+  - [-1, 2, C3k2, [256, False]]
+  - [[30, 42], 1, DeformableCrossModalFusion, [512, 0.08, 4]]
+  - [-1, 2, C3k2, [512, False]]
+  - [[33, 45], 1, DeformableCrossModalFusion, [1024, 0.08, 4]]
+  - [-1, 2, C3k2, [1024, True]]
+  - [[27, 30, 33], 1, Detect, [nc]]
+  - [[39, 42, 45], 1, Detect, [nc]]
+  - [[47, 49, 51], 1, Detect, [nc]]
+  - [[47, 49, 51], 1, Detect, [nc]]
+  - [[52, 53, 54, 55], 1, DualHeadFusionDetect, []]

@@ -1,0 +1,42 @@
+# RT-DETR-r18 MM: 单模块多输出主干（timm） + 多模态入口投影（Dual->3ch）
+
+nc: 80
+scales:
+  l: [1.00, 1.00, 1024]
+
+# 约定（与 RTDETR-main timm 配置对齐）
+# 0-P1/2（占位）
+# 1-P2/4
+# 2-P3/8
+# 3-P4/16
+# 4-P5/32
+
+backbone:
+  # 单模块多输出主干：模块内部包含输入投影 Conv（Dual=6ch -> 3ch），再接 timm features_only 主干
+  - [-1, 1, TimmBackbone, ["resnet18", False], 'Dual']  # 4
+
+head:
+  - [-1, 1, Conv, [256, 1, 1, None, 1, 1, False]]  # input_proj.2
+  - [-1, 1, AIFI, [1024, 8]]
+  - [-1, 1, Conv, [256, 1, 1]]  # Y5, lateral_convs.0
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
+  - [3, 1, Conv, [256, 1, 1, None, 1, 1, False]]  # input_proj.1
+  - [[-2, -1], 1, Concat, [1]]
+  - [-1, 3, RepC3, [256, 0.5]]  # fpn_blocks.0
+  - [-1, 1, Conv, [256, 1, 1]]  # Y4, lateral_convs.1
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
+  - [2, 1, Conv, [256, 1, 1, None, 1, 1, False]]  # input_proj.0
+  - [[-2, -1], 1, Concat, [1]]
+  - [-1, 3, RepC3, [256, 0.5]]  # X3, fpn_blocks.1
+
+  - [-1, 1, Conv, [256, 3, 2]]  # downsample_convs.0
+  - [[-1, 12], 1, Concat, [1]]
+  - [-1, 3, RepC3, [256, 0.5]]  # F4, pan_blocks.0
+
+  - [-1, 1, Conv, [256, 3, 2]]  # downsample_convs.1
+  - [[-1, 7], 1, Concat, [1]]
+  - [-1, 3, RepC3, [256, 0.5]]  # F5, pan_blocks.1
+
+  - [[16, 19, 22], 1, RTDETRDecoder, [nc, 256, 300, 4, 8, 3]]

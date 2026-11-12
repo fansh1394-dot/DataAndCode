@@ -1,0 +1,108 @@
+# Ultralytics YOLO26MM Aligned-3Head + ChannelPartition Fusion Configuration
+# 「三头 + 通道硬分割融合」，专为「几何已对齐」的双模态数据集设计。
+#
+# 相对 yolo26n-mm-dual-fusion-align3h.yaml 只换融合算子，头数与对齐假设不变：
+#   融合节点 DeformableCrossModalFusion -> ChannelPartitionFusion（改动 D3）
+#   参数 [ouc, max_offset, base, split, num_points, attn]
+#
+# 为什么换：
+#   门控族算子（GatedReliabilityFusion / DeformableCrossModalFusion）形式为
+#   fused = rgb + gate*(ir - rgb)，gate 可整体趋 0，IR 在**前向**被旁路、
+#   在**反向**拿不到梯度（实测：IR 64 通道全置零后 fuse 头仅 Δ=-0.006，
+#   fuse 损失 75.6% 梯度压 RGB）。A4/S3/D2-P1b 三次训练期干预均失败，
+#   因为约束的是 gate 取值，而 gate 本就有权关闭。
+#   ChannelPartitionFusion 把输出通道硬切成 [RGB 专属 | IR 专属 | 交互] 三段，
+#   IR 段无任何 gate，结构上不可被关闭；检测头的 3x3 卷积必然覆盖该段。
+#
+# 对齐假设的处理（与 align3h 一致）：
+#   1) 删除 fuse_ir 第四头（labels_ir ≡ labels，双坐标系监督纯冗余）；
+#   2) max_offset 置 0：数据已配准，位移只有插值损失。此时 grid_sample 在整数
+#      网格点上采样，等价于恒等映射（无模糊），K 点重合、注意力退化为常数权重。
+#
+# 检测头分配：
+#   L52 rgb 头 / L53 ir 头 / L54 fuse 头 / L55 聚合层（零参数）
+
+nc: 80
+end2end: True   # YOLO26特性: end-to-end detection (one2many + one2one dual branches)
+reg_max: 1      # YOLO26特性: simplified DFL bins
+
+scales:
+  n: [0.50, 0.25, 1024]
+  s: [0.50, 0.50, 1024]
+  m: [0.50, 1.00, 512]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.50, 512]
+
+backbone:
+  # ---------------- RGB 支路 (0-10) ----------------
+  - [-1, 1, Conv, [64, 3, 2], 'RGB']             # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]]                   # 1-P2/4
+  - [-1, 2, C3k2, [256, False, 0.25]]            # 2
+  - [-1, 1, Conv, [256, 3, 2]]                   # 3-P3/8
+  - [-1, 2, C3k2, [512, False, 0.25]]            # 4
+  - [-1, 1, Conv, [512, 3, 2]]                   # 5-P4/16
+  - [-1, 2, C3k2, [512, True]]                   # 6
+  - [-1, 1, Conv, [1024, 3, 2]]                  # 7-P5/32
+  - [-1, 2, C3k2, [1024, True]]                  # 8
+  - [-1, 1, SPPF, [1024, 5, 3, True]]            # 9  (YOLO26: shortcut=True)
+  - [-1, 2, C2PSA, [1024]]                       # 10
+
+  # ---------------- IR 支路 (11-21) ----------------
+  - [-1, 1, Conv, [64, 3, 2], 'X']               # 11-P1/2
+  - [-1, 1, Conv, [128, 3, 2]]                   # 12-P2/4
+  - [-1, 2, C3k2, [256, False, 0.25]]            # 13
+  - [-1, 1, Conv, [256, 3, 2]]                   # 14-P3/8
+  - [-1, 2, C3k2, [512, False, 0.25]]            # 15
+  - [-1, 1, Conv, [512, 3, 2]]                   # 16-P4/16
+  - [-1, 2, C3k2, [512, True]]                   # 17
+  - [-1, 1, Conv, [1024, 3, 2]]                  # 18-P5/32
+  - [-1, 2, C3k2, [1024, True]]                  # 19
+  - [-1, 1, SPPF, [1024, 5, 3, True]]            # 20 (YOLO26: shortcut=True)
+  - [-1, 2, C2PSA, [1024]]                       # 21
+
+head:
+  # ---------------- RGB neck (22-27) ----------------
+  - [10, 1, nn.Upsample, [None, 2, "nearest"]]   # 22
+  - [[-1, 6], 1, Concat, [1]]                    # 23 cat backbone P4
+  - [-1, 2, C3k2, [512, False]]                  # 24
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]   # 25
+  - [[-1, 4], 1, Concat, [1]]                    # 26 cat backbone P3
+  - [-1, 2, C3k2, [256, False]]                  # 27 (P3/8-small)
+
+  - [-1, 1, Conv, [256, 3, 2]]                   # 28
+  - [[-1, 24], 1, Concat, [1]]                   # 29 cat head P4
+  - [-1, 2, C3k2, [512, False]]                  # 30 (P4/16-medium)
+
+  - [-1, 1, Conv, [512, 3, 2]]                   # 31
+  - [[-1, 10], 1, Concat, [1]]                   # 32 cat backbone P5
+  - [-1, 2, C3k2, [1024, True]]                  # 33 (P5/32-large)
+
+  # ---------------- IR neck (34-45) ----------------
+  - [21, 1, nn.Upsample, [None, 2, "nearest"]]   # 34
+  - [[-1, 17], 1, Concat, [1]]                   # 35
+  - [-1, 2, C3k2, [512, False]]                  # 36
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]   # 37
+  - [[-1, 15], 1, Concat, [1]]                   # 38
+  - [-1, 2, C3k2, [256, False]]                  # 39 (P3/8-small)
+
+  - [-1, 1, Conv, [256, 3, 2]]                   # 40
+  - [[-1, 36], 1, Concat, [1]]                   # 41
+  - [-1, 2, C3k2, [512, False]]                  # 42 (P4/16-medium)
+
+  - [-1, 1, Conv, [512, 3, 2]]                   # 43
+  - [[-1, 21], 1, Concat, [1]]                   # 44
+  - [-1, 2, C3k2, [1024, True]]                  # 45 (P5/32-large)
+
+  # ---------------- 融合 neck (46-51)：三个融合节点（对齐模式，位移置 0） ----------------
+  - [[27, 39], 1, ChannelPartitionFusion, [256, 0.0, "rgb", [0.5, 0.25, 0.25], 4, "channel"]]  # 46
+  - [-1, 2, C3k2, [256, False]]                                  # 47 fuse P3
+  - [[30, 42], 1, ChannelPartitionFusion, [512, 0.0, "rgb", [0.5, 0.25, 0.25], 4, "channel"]]  # 48
+  - [-1, 2, C3k2, [512, False]]                                  # 49 fuse P4
+  - [[33, 45], 1, ChannelPartitionFusion, [1024, 0.0, "rgb", [0.5, 0.25, 0.25], 4, "channel"]]  # 50
+  - [-1, 2, C3k2, [1024, True]]                                  # 51 fuse P5
+
+  # ---------------- 三个 v26Detect 头 + 聚合层 ----------------
+  - [[27, 30, 33], 1, v26Detect, [nc]]           # 52 rgb 头（RGB 坐标系）
+  - [[39, 42, 45], 1, v26Detect, [nc]]           # 53 ir  头（IR  坐标系）
+  - [[47, 49, 51], 1, v26Detect, [nc]]           # 54 fuse 头（融合特征）
+  - [[52, 53, 54], 1, DualHeadFusionDetectV26, []]   # 55 聚合层（零参数）

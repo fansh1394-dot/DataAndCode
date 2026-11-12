@@ -1,0 +1,20 @@
+path: /root/rivermind-fs/birddrone/avid_yolo
+train: images/train
+val: images/val
+test: images/val
+modality:
+  rgb: images
+  ir: images_ir
+modality_used:
+- rgb
+- ir
+labels:
+  rgb: labels
+  ir: labels_ir
+pair_policy: any
+align: false
+channels: 3
+Xch: 3
+nc: 1
+names:
+  0: UAV
