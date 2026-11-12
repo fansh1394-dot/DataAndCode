@@ -1,0 +1,20 @@
+{
+  "tag": "uavcb_E1_gtpatch_dual",
+  "weights": "YOLO26/ResTest/uavcb_E1_rgbonly_s0/weights/best.pt",
+  "split": "test",
+  "labels_mode": "dual",
+  "derived_yaml": "/3250410011/root/rivermind-data/MutilModel_3485988898/_d2p1/eval_yamls/data_test_dual.yaml",
+  "is_dual_head": false,
+  "validator": "MultiModalDetectionValidator",
+  "imgsz": 640,
+  "batch": 32,
+  "late_route": false,
+  "late_route_thresholds": null,
+  "metrics": {
+    "metrics/precision(B)": 0.021010992462455944,
+    "metrics/recall(B)": 0.01764705882352941,
+    "metrics/mAP50(B)": 0.0020270539867548185,
+    "metrics/mAP50-95(B)": 0.0004069869131446124,
+    "fitness": 0.000568993620505633
+  }
+}

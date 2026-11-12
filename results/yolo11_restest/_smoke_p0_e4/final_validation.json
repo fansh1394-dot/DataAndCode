@@ -1,0 +1,163 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at_utc": "2026-10-19T15:53:24Z",
+  "experiment": {
+    "task": "detect",
+    "args": {
+      "epochs": 1,
+      "batch": 16,
+      "imgsz": 640,
+      "data": "/root/rivermind-data/uav_data_v2/data.yaml",
+      "lr0": 0.01,
+      "optimizer": "auto",
+      "device": "0"
+    }
+  },
+  "model": {
+    "family": "YOLOMM",
+    "task": "detect",
+    "model_class": "DetectionModel",
+    "yaml": "yolo11n-mm-dual-fusion-deform.yaml",
+    "nc": 1,
+    "names": {
+      "0": "UAV"
+    },
+    "channels": 3
+  },
+  "multimodal": {
+    "enabled": true,
+    "mode": "dual",
+    "modality": null,
+    "models": [
+      "rgb",
+      "ir"
+    ],
+    "x_modality": "ir",
+    "x_channels": 3,
+    "modalities": {
+      "rgb": "images",
+      "ir": "images_ir"
+    }
+  },
+  "data": {
+    "data_cfg": "/root/rivermind-data/uav_data_v2/data.yaml",
+    "data_dict": {
+      "path": "/root/rivermind-data/uav_data_v2",
+      "train": "/3250410011/root/rivermind-data/uav_data_v2/images/train",
+      "val": "/3250410011/root/rivermind-data/uav_data_v2/images/val",
+      "test": "/3250410011/root/rivermind-data/uav_data_v2/images/test",
+      "nc": 1,
+      "Xch": 3
+    }
+  },
+  "final_validation": {
+    "checkpoint": {
+      "best": "/3250410011/root/rivermind-data/MutilModel_3485988898/ResTest/_smoke_p0_e4/weights/best.pt",
+      "last": "/3250410011/root/rivermind-data/MutilModel_3485988898/ResTest/_smoke_p0_e4/weights/last.pt"
+    },
+    "metrics_raw": {
+      "metrics/precision(B)": 0.911701409588192,
+      "metrics/recall(B)": 0.9103966873161545,
+      "metrics/mAP50(B)": 0.945381061342453,
+      "metrics/mAP50-95(B)": 0.5204534923261057,
+      "metrics/rgb/metrics/precision(B)": 0.9284035524731781,
+      "metrics/rgb/metrics/recall(B)": 0.9063384509820739,
+      "metrics/rgb/metrics/mAP50(B)": 0.9427698007368579,
+      "metrics/rgb/metrics/mAP50-95(B)": 0.5359301231956336,
+      "metrics/rgb/fitness": 0.576614090949756,
+      "metrics/ir/metrics/precision(B)": 0.884702330385083,
+      "metrics/ir/metrics/recall(B)": 0.832446143660477,
+      "metrics/ir/metrics/mAP50(B)": 0.8963368682587418,
+      "metrics/ir/metrics/mAP50-95(B)": 0.454740372930433,
+      "metrics/ir/fitness": 0.4989000224632639,
+      "metrics/fuse/metrics/precision(B)": 0.911701409588192,
+      "metrics/fuse/metrics/recall(B)": 0.9103966873161545,
+      "metrics/fuse/metrics/mAP50(B)": 0.945381061342453,
+      "metrics/fuse/metrics/mAP50-95(B)": 0.5204534923261057,
+      "metrics/fuse/fitness": 0.5629462492277405,
+      "metrics/fuse_ir/metrics/precision(B)": 0.9597280537967988,
+      "metrics/fuse_ir/metrics/recall(B)": 0.8779722589167768,
+      "metrics/fuse_ir/metrics/mAP50(B)": 0.9317723990914464,
+      "metrics/fuse_ir/metrics/mAP50-95(B)": 0.48015201422717757,
+      "metrics/fuse_ir/fitness": 0.5253140527136044,
+      "metrics/fusion_gain_over_rgb": -0.015476630869527885,
+      "metrics/fusion_gain_over_ir": 0.0657131193956727,
+      "metrics/subset/rgb/both/metrics/precision(B)": 0.9281568726783506,
+      "metrics/subset/rgb/both/metrics/recall(B)": 0.9063873803982415,
+      "metrics/subset/rgb/both/metrics/mAP50(B)": 0.9428720052501587,
+      "metrics/subset/rgb/both/metrics/mAP50-95(B)": 0.5357515582122059,
+      "metrics/subset/rgb/both/fitness": 0.5764636029160012,
+      "metrics/subset/rgb/only_rgb/metrics/precision(B)": 0.9691080206232648,
+      "metrics/subset/rgb/only_rgb/metrics/recall(B)": 0.9137931034482759,
+      "metrics/subset/rgb/only_rgb/metrics/mAP50(B)": 0.9458646225954498,
+      "metrics/subset/rgb/only_rgb/metrics/mAP50-95(B)": 0.6143336087316098,
+      "metrics/subset/rgb/only_rgb/fitness": 0.6474867101179937,
+      "metrics/subset/ir/both/metrics/precision(B)": 0.8849174368732077,
+      "metrics/subset/ir/both/metrics/recall(B)": 0.8359624170330144,
+      "metrics/subset/ir/both/metrics/mAP50(B)": 0.9004330625012504,
+      "metrics/subset/ir/both/metrics/mAP50-95(B)": 0.4580927678968649,
+      "metrics/subset/ir/both/fitness": 0.5023267973573035,
+      "metrics/subset/ir/only_ir/metrics/precision(B)": 0.8646412497908305,
+      "metrics/subset/ir/only_ir/metrics/recall(B)": 0.7475538160469667,
+      "metrics/subset/ir/only_ir/metrics/mAP50(B)": 0.8079474592082189,
+      "metrics/subset/ir/only_ir/metrics/mAP50-95(B)": 0.3688209306884554,
+      "metrics/subset/ir/only_ir/fitness": 0.41273358354043177,
+      "metrics/subset/fuse/both/metrics/precision(B)": 0.9114701771720538,
+      "metrics/subset/fuse/both/metrics/recall(B)": 0.910552105630467,
+      "metrics/subset/fuse/both/metrics/mAP50(B)": 0.9456056342730395,
+      "metrics/subset/fuse/both/metrics/mAP50-95(B)": 0.5204058544265303,
+      "metrics/subset/fuse/both/fitness": 0.5629258324111812,
+      "metrics/subset/fuse/only_rgb/metrics/precision(B)": 0.9448136086429558,
+      "metrics/subset/fuse/only_rgb/metrics/recall(B)": 0.8856115958021774,
+      "metrics/subset/fuse/only_rgb/metrics/mAP50(B)": 0.9286911306941202,
+      "metrics/subset/fuse/only_rgb/metrics/mAP50-95(B)": 0.5723137193994878,
+      "metrics/subset/fuse/only_rgb/fitness": 0.6079514605289511,
+      "metrics/subset/fuse_ir/both/metrics/precision(B)": 0.9594002721189911,
+      "metrics/subset/fuse_ir/both/metrics/recall(B)": 0.8817343332471339,
+      "metrics/subset/fuse_ir/both/metrics/mAP50(B)": 0.9351342871558295,
+      "metrics/subset/fuse_ir/both/metrics/mAP50-95(B)": 0.48374177256237816,
+      "metrics/subset/fuse_ir/both/fitness": 0.5288810240217233,
+      "metrics/subset/fuse_ir/only_ir/metrics/precision(B)": 0.9648326546434329,
+      "metrics/subset/fuse_ir/only_ir/metrics/recall(B)": 0.786692759295499,
+      "metrics/subset/fuse_ir/only_ir/metrics/mAP50(B)": 0.8691112677227897,
+      "metrics/subset/fuse_ir/only_ir/metrics/mAP50-95(B)": 0.3975165737631706,
+      "metrics/subset/fuse_ir/only_ir/fitness": 0.44467604315913256,
+      "metrics/fusion_dual_coord_hm": 0.4994911396460433,
+      "metrics/hard/fuse_ir/only_ir_mAP50-95": 0.3975165737631706,
+      "metrics/hard/ir/only_ir_mAP50-95": 0.3688209306884554,
+      "metrics/hard/fuse/only_rgb_mAP50-95": 0.5723137193994878
+    },
+    "metrics_normalized": {
+      "task": "detect",
+      "groups": [
+        {
+          "group": "B",
+          "raw_keys": {
+            "precision": "metrics/subset/fuse_ir/only_ir/metrics/precision(B)",
+            "recall": "metrics/subset/fuse_ir/only_ir/metrics/recall(B)",
+            "map50": "metrics/subset/fuse_ir/only_ir/metrics/mAP50(B)",
+            "map50_95": "metrics/hard/fuse/only_rgb_mAP50-95"
+          },
+          "precision": 0.9648326546434329,
+          "recall": 0.786692759295499,
+          "map50": 0.8691112677227897,
+          "map50_95": 0.5723137193994878
+        }
+      ],
+      "primary_metric": {
+        "name": "map50_95",
+        "group": "B",
+        "value": 0.5723137193994878
+      }
+    }
+  },
+  "summary": {
+    "text": "task=detect; multimodal=dual, x_modality=ir, x_channels=3; primary=B.map50_95=0.5723; groups=[B: P=0.9648, R=0.7867, mAP50=0.8691, mAP50-95=0.5723]"
+  },
+  "integrity": {
+    "missing_fields": [],
+    "warnings": [
+      "per_class metrics not available"
+    ]
+  }
+}

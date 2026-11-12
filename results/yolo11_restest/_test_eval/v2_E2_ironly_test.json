@@ -1,0 +1,18 @@
+{
+  "tag": "v2_E2_ironly_test",
+  "weights": "ResTest/v2_E2_ironly_s0/weights/best.pt",
+  "split": "test",
+  "labels_mode": "dual",
+  "derived_yaml": "/3250410011/root/rivermind-data/MutilModel_3485988898/_d2p1/eval_yamls/data_test_dual.yaml",
+  "is_dual_head": false,
+  "validator": "MultiModalDetectionValidator",
+  "imgsz": 640,
+  "batch": 32,
+  "metrics": {
+    "metrics/precision(B)": 0.22453711642730562,
+    "metrics/recall(B)": 0.1881622672267854,
+    "metrics/mAP50(B)": 0.09733267268505638,
+    "metrics/mAP50-95(B)": 0.02954092306850003,
+    "fitness": 0.036320098030155665
+  }
+}

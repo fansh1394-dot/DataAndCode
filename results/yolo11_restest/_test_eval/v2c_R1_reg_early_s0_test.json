@@ -1,0 +1,18 @@
+{
+  "tag": "v2c_R1_reg_early_s0_test",
+  "weights": "/3250410011/root/rivermind-data/MutilModel_3485988898/ResTest/v2c_R1_reg_early_s0/weights/best.pt",
+  "split": "test",
+  "labels_mode": "vis",
+  "derived_yaml": "/3250410011/root/rivermind-data/MutilModel_3485988898/_d2p1/eval_yamls/data_test_vis.yaml",
+  "is_dual_head": false,
+  "validator": "MultiModalDetectionValidator",
+  "imgsz": 640,
+  "batch": 32,
+  "metrics": {
+    "metrics/precision(B)": 0.9682668928020939,
+    "metrics/recall(B)": 0.9046335193429055,
+    "metrics/mAP50(B)": 0.9505003978311876,
+    "metrics/mAP50-95(B)": 0.5679585546021848,
+    "fitness": 0.6062127389250851
+  }
+}

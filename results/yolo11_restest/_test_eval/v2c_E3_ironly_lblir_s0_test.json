@@ -1,0 +1,18 @@
+{
+  "tag": "v2c_E3_ironly_lblir_s0_test",
+  "weights": "ResTest/v2c_E3_ironly_lblir_s0/weights/best.pt",
+  "split": "test",
+  "labels_mode": "ir",
+  "derived_yaml": "/3250410011/root/rivermind-data/MutilModel_3485988898/_d2p1/eval_yamls/data_test_ir.yaml",
+  "is_dual_head": false,
+  "validator": "MultiModalDetectionValidator",
+  "imgsz": 640,
+  "batch": 32,
+  "metrics": {
+    "metrics/precision(B)": 0.9628996214966655,
+    "metrics/recall(B)": 0.8315520722004512,
+    "metrics/mAP50(B)": 0.8805373220760421,
+    "metrics/mAP50-95(B)": 0.4696178316341844,
+    "fitness": 0.5107097806783703
+  }
+}

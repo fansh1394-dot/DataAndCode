@@ -1,0 +1,20 @@
+{
+  "tag": "uavcb_E1_rgbonly_s0_test_vis",
+  "weights": "YOLO26/ResTest/uavcb_E1_rgbonly_s0/weights/best.pt",
+  "split": "test",
+  "labels_mode": "vis",
+  "derived_yaml": "/3250410011/root/rivermind-data/MutilModel_3485988898/_d2p1/eval_yamls/data_test_vis.yaml",
+  "is_dual_head": false,
+  "validator": "MultiModalDetectionValidator",
+  "imgsz": 640,
+  "batch": 32,
+  "late_route": false,
+  "late_route_thresholds": null,
+  "metrics": {
+    "metrics/precision(B)": 0.919313940649821,
+    "metrics/recall(B)": 0.7037316544113245,
+    "metrics/mAP50(B)": 0.8055996886705854,
+    "metrics/mAP50-95(B)": 0.49784470847395423,
+    "fitness": 0.5286202064936174
+  }
+}
