@@ -1,0 +1,2 @@
+/3250410011/root/rivermind-data/MutilModel_3485988898/YOLO26/ResTest/mdp150_M3_dual_s0/weights/best.pt 153188374
+/3250410011/root/rivermind-data/MutilModel_3485988898/YOLO26/ResTest/mdp150_M3_dual_s0/weights/last.pt 153188374
