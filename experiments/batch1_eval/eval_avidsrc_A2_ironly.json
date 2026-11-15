@@ -1,0 +1,24 @@
+{
+  "tag": "b1_A2_ironly",
+  "weights": "/3250410011/root/rivermind-data/MutilModel_3485988898/YOLO26/ResTest/bdc3_ironly_yolo26n_s0/weights/best.pt",
+  "split": "val",
+  "labels_mode": "dual",
+  "derived_yaml": "/3250410011/root/rivermind-data/MutilModel_3485988898/_d2p1/eval_yamls/data_val_dual.yaml",
+  "is_dual_head": false,
+  "validator": "MultiModalDetectionValidator",
+  "imgsz": 640,
+  "batch": 16,
+  "late_route": false,
+  "zero_modality": null,
+  "zero_fill": null,
+  "ir_shift": null,
+  "ir_rotate": 0.0,
+  "late_route_thresholds": null,
+  "metrics": {
+    "metrics/precision(B)": 0.755531777494432,
+    "metrics/recall(B)": 0.7440714757404284,
+    "metrics/mAP50(B)": 0.7948172431934072,
+    "metrics/mAP50-95(B)": 0.48014799751539905,
+    "fitness": 0.5116149220831999
+  }
+}
