@@ -1,0 +1,99 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at_utc": "2026-11-12T08:57:52Z",
+  "experiment": {
+    "task": "detect",
+    "args": {
+      "epochs": 150,
+      "batch": 32,
+      "imgsz": 640,
+      "data": "/root/rivermind-fs/birddrone/bd_nc3/data_nc3.yaml",
+      "lr0": 0.01,
+      "optimizer": "auto",
+      "device": "0"
+    }
+  },
+  "model": {
+    "family": "YOLOMM",
+    "task": "detect",
+    "model_class": "DetectionModel",
+    "yaml": "yolo26n-mm-single-baseline.yaml",
+    "nc": 3,
+    "names": {
+      "0": "bird",
+      "1": "drone",
+      "2": "other"
+    },
+    "channels": 3
+  },
+  "multimodal": {
+    "enabled": true,
+    "mode": "dual",
+    "modality": null,
+    "models": [
+      "rgb",
+      "ir"
+    ],
+    "x_modality": "ir",
+    "x_channels": 3,
+    "modalities": {
+      "rgb": "images",
+      "ir": "images_ir"
+    }
+  },
+  "data": {
+    "data_cfg": "/root/rivermind-fs/birddrone/bd_nc3/data_nc3.yaml",
+    "data_dict": {
+      "path": "/root/rivermind-fs/birddrone/bd_nc3",
+      "train": "/3250410011/root/rivermind-fs/birddrone/bd_nc3/train_nc3.txt",
+      "val": "/3250410011/root/rivermind-fs/birddrone/bd_nc3/val_nc3.txt",
+      "test": "/3250410011/root/rivermind-fs/birddrone/bd_nc3/images/test",
+      "nc": 3,
+      "Xch": 3
+    }
+  },
+  "final_validation": {
+    "checkpoint": {
+      "best": "/3250410011/root/rivermind-data/MutilModel_3485988898/YOLO26/ResTest/bdc3_ironly_yolo26n_s0/weights/best.pt",
+      "last": "/3250410011/root/rivermind-data/MutilModel_3485988898/YOLO26/ResTest/bdc3_ironly_yolo26n_s0/weights/last.pt"
+    },
+    "metrics_raw": {
+      "metrics/precision(B)": 0.7570846681077569,
+      "metrics/recall(B)": 0.7386863130848352,
+      "metrics/mAP50(B)": 0.7948309898385215,
+      "metrics/mAP50-95(B)": 0.4802115721545098
+    },
+    "metrics_normalized": {
+      "task": "detect",
+      "groups": [
+        {
+          "group": "B",
+          "raw_keys": {
+            "precision": "metrics/precision(B)",
+            "recall": "metrics/recall(B)",
+            "map50": "metrics/mAP50(B)",
+            "map50_95": "metrics/mAP50-95(B)"
+          },
+          "precision": 0.7570846681077569,
+          "recall": 0.7386863130848352,
+          "map50": 0.7948309898385215,
+          "map50_95": 0.4802115721545098
+        }
+      ],
+      "primary_metric": {
+        "name": "map50_95",
+        "group": "B",
+        "value": 0.4802115721545098
+      }
+    }
+  },
+  "summary": {
+    "text": "task=detect; multimodal=dual, x_modality=ir, x_channels=3; primary=B.map50_95=0.4802; groups=[B: P=0.7571, R=0.7387, mAP50=0.7948, mAP50-95=0.4802]"
+  },
+  "integrity": {
+    "missing_fields": [],
+    "warnings": [
+      "per_class metrics not available"
+    ]
+  }
+}
